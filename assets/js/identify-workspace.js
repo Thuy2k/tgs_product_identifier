@@ -26,9 +26,26 @@
         $.post(tgsIdtf.ajaxUrl, data)
             .done(function (r) {
                 if (r.success) { if (done) done(r.data); }
-                else { toast(r.data && r.data.message ? r.data.message : 'Lỗi', 'error'); if (fail) fail(); }
+                else {
+                    var msg = (r.data && r.data.message) ? r.data.message : (typeof r.data === 'string' ? r.data : 'Lỗi không xác định');
+                    toast(msg, 'error');
+                    if (fail) fail(msg);
+                }
             })
-            .fail(function () { toast('Lỗi kết nối máy chủ.', 'error'); if (fail) fail(); });
+            .fail(function (xhr) {
+                var msg = 'Lỗi máy chủ';
+                if (xhr.status) msg += ' (' + xhr.status + ')';
+                // Thử parse response body
+                try {
+                    var body = JSON.parse(xhr.responseText);
+                    if (body && body.data && body.data.message) msg = body.data.message;
+                    else if (typeof body.data === 'string') msg = body.data;
+                } catch (e) {
+                    if (xhr.responseText && xhr.responseText.length < 300) msg += ': ' + xhr.responseText.substring(0, 200);
+                }
+                toast(msg, 'error');
+                if (fail) fail(msg);
+            });
     }
     function esc(s) { return $('<span>').text(s || '').html(); }
     function toast(msg, type) {
@@ -544,6 +561,11 @@
                 flashScanInput('danger');
             } else if (!d.can_assign) {
                 var alertMsg = d.status_label || 'Mã không thể gắn.';
+                if (d.assignment) {
+                    var a = d.assignment;
+                    alertMsg += ' | Phiếu: ' + (a.ledger_title || a.ledger_code);
+                    if (a.block_position) alertMsg += ' (khối ' + a.block_position + '/' + a.total_blocks + ')';
+                }
                 if (d.warning_msg) alertMsg += ' ⚠ ' + d.warning_msg;
                 showScanAlert(alertMsg, 'warning');
                 beepWarning();
@@ -734,11 +756,23 @@
                     vars += '<span class="idtf-variant-tag ms-1" style="font-size:10px;">' + esc(v.variant_label) + ': ' + esc(v.variant_value) + '</span>';
                 });
             }
+            // Hiển thị thông tin phiếu + khối nếu có
+            var assignInfo = '';
+            if (d.assignment) {
+                var a = d.assignment;
+                assignInfo = '<div style="font-size:11px; margin-top:4px; color:#5f61e6;">' 
+                    + '<i class="bx bx-file me-1"></i>Phiếu: <b>' + esc(a.ledger_title || a.ledger_code) + '</b>'
+                    + ' <span style="color:#8592a3;">(' + esc(a.ledger_code) + ')</span>';
+                if (a.block_position) {
+                    assignInfo += ' — <i class="bx bx-cube me-1"></i>Khối thứ ' + a.block_position + '/' + a.total_blocks;
+                }
+                assignInfo += '</div>';
+            }
             var warning = '';
             if (d.warning) {
                 warning = '<div class="text-danger mt-1" style="font-size:11px;"><i class="bx bx-error me-1"></i>' + esc(d.warning_msg) + '</div>';
             }
-            $r.html('<div class="qs-found ' + cls + '"><i class="bx bx-barcode me-1"></i><code>' + esc(d.barcode) + '</code> — ' + label + vars + warning + '</div>');
+            $r.html('<div class="qs-found ' + cls + '"><i class="bx bx-barcode me-1"></i><code>' + esc(d.barcode) + '</code> — ' + label + vars + assignInfo + warning + '</div>');
         });
     }
 

@@ -94,6 +94,69 @@ class TGS_Identifier_Ajax
     }
 
     /**
+     * Lookup phiếu + khối chứa lot (nếu đã được gắn vào phiếu định danh)
+     * Trả về array ['ledger_code','ledger_title','block_id','block_position','block_product_name'] hoặc null
+     */
+    private static function lookup_lot_assignment($lot)
+    {
+        $ledger_id = intval($lot['identifier_ledger_id'] ?? 0);
+        if ($ledger_id <= 0) return null;
+
+        global $wpdb;
+
+        // Lấy thông tin phiếu
+        $ledger = $wpdb->get_row($wpdb->prepare(
+            "SELECT local_ledger_id, local_ledger_code, local_ledger_title
+             FROM " . self::ledger_table() . "
+             WHERE local_ledger_id = %d AND is_deleted = 0",
+            $ledger_id
+        ), ARRAY_A);
+
+        if (!$ledger) return null;
+
+        // Tìm khối chứa lot (match product_id + combo_hash + ledger_id)
+        $combo_hash = $lot['variant_combo_hash'] ?? null;
+        $product_id = intval($lot['local_product_name_id'] ?? 0);
+        $where_combo = $combo_hash !== null
+            ? $wpdb->prepare(" AND variant_combo_hash = %s", $combo_hash)
+            : " AND variant_combo_hash IS NULL";
+
+        $blocks_in_ledger = $wpdb->get_results($wpdb->prepare(
+            "SELECT block_id, block_sort_order, local_product_name_id
+             FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . "
+             WHERE ledger_id = %d AND is_deleted = 0
+             ORDER BY block_sort_order ASC, block_id ASC",
+            $ledger_id
+        ), ARRAY_A);
+
+        $block_position = null;
+        $block_id = null;
+        foreach ($blocks_in_ledger as $idx => $b) {
+            if (intval($b['local_product_name_id']) === $product_id) {
+                // Check combo_hash match nếu cần
+                $b_hash = $wpdb->get_var($wpdb->prepare(
+                    "SELECT variant_combo_hash FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . " WHERE block_id = %d",
+                    $b['block_id']
+                ));
+                if (($combo_hash === null && $b_hash === null) || $combo_hash === $b_hash) {
+                    $block_position = $idx + 1; // 1-indexed
+                    $block_id = intval($b['block_id']);
+                    break;
+                }
+            }
+        }
+
+        return [
+            'ledger_id'    => $ledger['local_ledger_id'],
+            'ledger_code'  => $ledger['local_ledger_code'],
+            'ledger_title' => $ledger['local_ledger_title'],
+            'block_id'     => $block_id,
+            'block_position' => $block_position,
+            'total_blocks' => count($blocks_in_ledger),
+        ];
+    }
+
+    /**
      * LIKE pattern cho product_lot_meta chứa blank_ledger_id.
      * JSON format: {"blank_ledger_id":NNN,"generated_by":"..."}
      * Dùng pattern kết thúc bằng [,}] để không match NNN123
@@ -964,6 +1027,10 @@ class TGS_Identifier_Ajax
             $result['warning_msg'] = 'Mã ' . $barcode . ' có trạng thái bất thường (' . $status . ').';
         }
 
+        // Lookup phiếu + khối chứa mã
+        $assignment = self::lookup_lot_assignment($lot);
+        if ($assignment) $result['assignment'] = $assignment;
+
         self::json_ok($result);
     }
 
@@ -1247,6 +1314,10 @@ class TGS_Identifier_Ajax
             $result['warning'] = true;
             $result['warning_msg'] = 'Mã này có trạng thái bất thường (' . $status . ').';
         }
+
+        // Lookup phiếu + khối chứa mã
+        $assignment = self::lookup_lot_assignment($lot);
+        if ($assignment) $result['assignment'] = $assignment;
 
         // Lấy biến thể
         $variants = $wpdb->get_results($wpdb->prepare(
