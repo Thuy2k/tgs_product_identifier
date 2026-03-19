@@ -497,7 +497,13 @@
         $('#qpTax').val(8);
         $('#qpPriceBeforeTax').val(0);
         $('#qpUnit').val('Cái');
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('modalQuickProduct')).show();
+        // Ẩn addBlock trước, đợi hẳn rồi mới mở quickProduct (tránh stacked modals)
+        var addBlockEl = document.getElementById('modalAddBlock');
+        var addBlockInstance = bootstrap.Modal.getInstance(addBlockEl);
+        $(addBlockEl).one('hidden.bs.modal', function () {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('modalQuickProduct')).show();
+        });
+        if (addBlockInstance) addBlockInstance.hide();
     });
 
     function selectBlockProduct(p) {
@@ -1020,10 +1026,27 @@
             product_unit:           $('#qpUnit').val()
         }, function (d) {
             $btn.prop('disabled', false).html('<i class="bx bx-check me-1"></i>Tạo sản phẩm & chọn ngay');
-            bootstrap.Modal.getInstance(document.getElementById('modalQuickProduct')).hide();
+
+            var product = d.product;
+            var qpEl = document.getElementById('modalQuickProduct');
+
+            // Đóng quickProduct → đợi hẳn → mở lại addBlock → đợi hiện xong → fill product
+            $(qpEl).one('hidden.bs.modal', function () {
+                var addBlockEl = document.getElementById('modalAddBlock');
+
+                if (product) {
+                    // Đợi addBlock hiện xong rồi mới fill sản phẩm
+                    $(addBlockEl).one('shown.bs.modal', function () {
+                        $('#blockProductDropdown').hide();
+                        selectBlockProduct(product);
+                    });
+                }
+
+                bootstrap.Modal.getOrCreateInstance(addBlockEl).show();
+            });
+
+            bootstrap.Modal.getInstance(qpEl).hide();
             toast('✅ ' + (d.message || 'Đã tạo sản phẩm!'));
-            // Select newly created product in the Add Block modal
-            if (d.product) selectBlockProduct(d.product);
         }, function () {
             $btn.prop('disabled', false).html('<i class="bx bx-check me-1"></i>Tạo sản phẩm & chọn ngay');
         });
