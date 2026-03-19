@@ -201,6 +201,9 @@ if (!defined('ABSPATH')) exit;
             <div class="modal-body">
                 <input type="hidden" id="scanBlockId" value="" />
 
+                <!-- Product info banner -->
+                <div id="scanProductInfo" class="idtf-modal-product-info mb-3" style="display:none;"></div>
+
                 <!-- Big scan counter -->
                 <div class="idtf-scan-counter-wrap text-center mb-3">
                     <div class="idtf-scan-counter" id="scanBigCount">0</div>
@@ -247,6 +250,10 @@ if (!defined('ABSPATH')) exit;
             </div>
             <div class="modal-body">
                 <input type="hidden" id="viewBlockId" value="" />
+
+                <!-- Product info banner -->
+                <div id="viewProductInfo" class="idtf-modal-product-info mb-3" style="display:none;"></div>
+
                 <div class="table-responsive">
                     <table class="table table-sm table-hover mb-0">
                         <thead class="table-light">

@@ -15,6 +15,7 @@
     var currentScanBlockId = 0;
     var viewBlockId = 0;
     var viewCodesPage = 1;
+    var blocksMap = {};           // {block_id: blockData} — for modal product info
 
     /* =====================================================================
      * HELPERS
@@ -54,6 +55,35 @@
         setTimeout(function () { $t.removeClass('show'); setTimeout(function () { $t.remove(); }, 300); }, 3000);
     }
     function buildUrl(view) { return window.location.pathname + '?page=tgs-shop-management&view=' + view; }
+
+    /**
+     * Render product info banner inside scan/view modal
+     */
+    function renderModalProductInfo(selector, blockId) {
+        var $el = $(selector);
+        var b = blocksMap[blockId];
+        if (!b) { $el.hide(); return; }
+
+        var varHtml = '';
+        if (b.variants && b.variants.length) {
+            $.each(b.variants, function (_, v) {
+                varHtml += '<span class="badge bg-label-primary me-1" style="font-size:11px;">'
+                    + esc(v.variant_label) + ': ' + esc(v.variant_value) + '</span>';
+            });
+        }
+
+        $el.html(
+            '<div class="d-flex align-items-start gap-2">'
+            + '<i class="bx bx-package" style="font-size:22px; color:#696cff; margin-top:2px;"></i>'
+            + '<div class="flex-grow-1" style="min-width:0;">'
+            + '  <div class="fw-semibold" style="font-size:13px;">' + esc(b.local_product_name || 'Sản phẩm #' + b.local_product_name_id) + '</div>'
+            + '  <div style="font-size:11px; color:#8592a3;">SKU: <b>' + esc(b.local_product_sku || '—') + '</b>'
+            + (b.local_product_barcode_main ? ' · Barcode: ' + esc(b.local_product_barcode_main) : '') + '</div>'
+            + (varHtml ? '<div class="mt-1">' + varHtml + '</div>' : '')
+            + '</div>'
+            + '</div>'
+        ).show();
+    }
 
     /* =====================================================================
      * SOUND FEEDBACK — Tiếng beep khi quét mã
@@ -297,6 +327,10 @@
             return;
         }
 
+        // Store blocks in map for modal product info
+        blocksMap = {};
+        $.each(blocks, function (_, b) { blocksMap[parseInt(b.block_id)] = b; });
+
         // Calculate totals for summary
         var totalCodes = 0;
         $.each(blocks, function (_, b) { totalCodes += parseInt(b.codes_count) || 0; });
@@ -518,6 +552,7 @@
         $('#scanPendingCount, #scanConfirmCount').text('0');
         $('#scanBigCount').text('0');
         $('#btnScanConfirm').prop('disabled', true);
+        renderModalProductInfo('#scanProductInfo', currentScanBlockId);
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalScanCodes')).show();
         setTimeout(function () { $('#scanInput').focus(); }, 400);
     });
@@ -653,6 +688,7 @@
         viewBlockId = parseInt($(this).data('block-id'));
         viewCodesPage = 1;
         $('#viewBlockId').val(viewBlockId);
+        renderModalProductInfo('#viewProductInfo', viewBlockId);
         loadViewCodes(1);
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalViewCodes')).show();
     });
