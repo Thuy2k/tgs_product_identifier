@@ -1,0 +1,632 @@
+================================================================================
+  KẾ HOẠCH PLUGIN: TGS PRODUCT IDENTIFIER — v1.0.0
+  (Sinh mã định danh trống + Định danh sản phẩm + Biến thể kết hợp)
+  Status: ✅ ĐÃ HOÀN THÀNH v1.0.0 — Sẵn sàng test
+  Created: 19/03/2026
+  Updated: 19/03/2026
+  Author: TGS Dev Team
+================================================================================
+
+MỤC LỤC:
+  0. BỐI CẢNH & LÝ DO TẠO PLUGIN MỚI
+  1. THIẾT KẾ DATABASE (CHÍNH XÁC — theo code đã build)
+  2. CẤU TRÚC PLUGIN & FILES
+  3. AJAX ENDPOINTS (23 endpoints, 6 nhóm A-F)
+  4. MÀN HÌNH 1: Sinh mã trống (create.php + create.js)
+  5. MÀN HÌNH 2: DS phiếu sinh mã (list.php + list.js)
+  6. MÀN HÌNH 3: Chi tiết phiếu mã (detail.php + detail.js)
+  7. MÀN HÌNH 4: Workspace định danh SP (workspace.php + workspace.js)
+  8. MÀN HÌNH 5: Quản lý biến thể (variants/list.php + variant-manager.js)
+  9. SIDEBAR & ROUTES & ENQUEUE
+  10. RESPONSIVE & UI/UX
+  11. QUY TẮC BẢO MẬT & HIỆU NĂNG
+  12. HƯỚNG DẪN NÂNG CẤP & MỞ RỘNG
+
+
+================================================================================
+ 0. BỐI CẢNH & LÝ DO TẠO PLUGIN MỚI
+================================================================================
+
+  HỆ THỐNG: POS "Thế Giới Sữa" — 650+ shop WordPress Multisite.
+  PLUGIN PHỤ THUỘC: tgs_shop_management (bắt buộc)
+
+  PLUGIN CŨ (tgs_lot_generator — đã backup → tgs_lot_generator_old_backup):
+    Flow cũ: Chọn SP → Chọn biến thể → Sinh mã → In dán
+    VẤN ĐỀ:
+      1. 20.000+ SKU × nhiều biến thể → in ra rồi mò dán = DỄ NHẦM
+      2. Biến thể chỉ 1 variant_id đơn → không hỗ trợ kết hợp
+         (VD: "Đỏ + Size M + 1-3 tháng" cần 3 biến thể cùng lúc)
+
+  GIẢI PHÁP MỚI (plugin tgs_product_identifier):
+    Bước 1: In mã trống (chỉ barcode, chưa gắn SP) → dán lên SP vật lý
+    Bước 2: Quét mã → gắn vào SP + biến thể kết hợp (không mò, quét là biết)
+    Biến thể kết hợp N:N qua bảng map + combo_hash
+
+  TRẠNG THÁI MÃ (local_product_lot_is_active trên wp_global_product_lots):
+    200  = Mã mới sinh (trống, chưa gắn SP) — MỚI từ plugin này
+    100  = Đã sinh + gắn SP nhưng chưa xác nhận vào kho (từ plugin cũ)
+      1  = Đã xác nhận, tồn kho (in stock)
+      0  = Đã bán / đã xuất
+     -1  = Hỏng / mất
+
+  LEDGER TYPES (local_ledger_type trên wp_X_local_ledger):
+    16  = Phiếu sinh mã (plugin cũ, vẫn giữ tương thích)
+    30  = Phiếu sinh mã trống (MỚI — TGS_LEDGER_TYPE_BLANK_CODES)
+    31  = Phiếu định danh SP (MỚI — TGS_LEDGER_TYPE_IDENTIFY)
+
+
+================================================================================
+ 1. THIẾT KẾ DATABASE (CHÍNH XÁC THEO CODE ĐÃ BUILD)
+================================================================================
+
+  ── 1.1 BẢNG CÓ SẴN ĐƯỢC SỬ DỤNG:
+
+  wp_global_product_lots (GLOBAL — không có site prefix)
+    → Bảng chính chứa tất cả mã barcode / lot
+    → Plugin này sử dụng các cột:
+      global_product_lot_id          BIGINT PK AI
+      global_product_lot_barcode     VARCHAR(255)    -- mã EAN-13
+      local_product_name_id          BIGINT          -- NULL khi trống, FK→product
+      global_product_lot_is_active   TINYINT         -- 200=trống, 1=tồn kho, 0=bán
+      local_product_lot_is_active    TINYINT         -- giống trên (dùng để lọc)
+      source_blog_id                 BIGINT          -- blog tạo mã
+      to_blog_id                     BIGINT          -- blog nhận mã
+      variant_id                     BIGINT          -- giữ tương thích plugin cũ
+      variant_combo_hash             VARCHAR(64)     — CỘT MỚI (migration)
+      identifier_ledger_id           BIGINT          — CỘT MỚI (migration)
+      product_lot_meta               TEXT            -- JSON lưu blank_ledger_id
+      user_id                        INTEGER
+      is_deleted                     TINYINT
+      created_at, updated_at         DATETIME
+    → INDEX: idx_variant_combo_hash, idx_identifier_ledger
+
+  wp_global_product_variants (GLOBAL)
+    → Bảng biến thể sản phẩm (đã có từ plugin cũ)
+    → Plugin này CRUD biến thể ở đây
+    → Columns: variant_id, local_product_name_id, source_blog_id,
+      variant_type, variant_label, variant_value, variant_sku_suffix,
+      variant_barcode_main, variant_price_adjustment, variant_sort_order,
+      variant_meta(JSON), is_active, is_deleted, created_at, updated_at
+
+  wp_X_local_ledger (LOCAL — mỗi site 1 bảng)
+    → Phiếu chung: nhập/xuất/sinh mã/định danh...
+    → Plugin này dùng type=30 (sinh mã trống) và type=31 (định danh SP)
+    → Columns dùng: local_ledger_id, local_ledger_code, local_ledger_title,
+      local_ledger_item_id(JSON — mảng lot_ids), local_ledger_type,
+      local_ledger_note, local_ledger_status, local_ledger_person_meta(JSON),
+      user_id, is_deleted, created_at, updated_at
+
+  wp_X_local_product_name (LOCAL — mỗi site 1 bảng)
+    → Danh mục sản phẩm
+    → Plugin này dùng: local_product_name_id, local_product_name,
+      local_product_sku, local_product_barcode_main, local_product_unit,
+      local_product_price_after_tax, local_product_thumbnail,
+      local_product_is_tracking, local_product_status, user_id, is_deleted
+
+  ── 1.2 BẢNG MỚI PLUGIN NÀY TẠO:
+
+  wp_global_lot_variant_map (GLOBAL)
+  → Bảng trung gian N:N giữa lot ↔ biến thể (COMBINATION VARIANTS)
+  ┌─────────────────────────┬──────────────┬─────────────────────────────────────┐
+  │ Cột                      │ Kiểu         │ Ghi chú                             │
+  ├─────────────────────────┼──────────────┼─────────────────────────────────────┤
+  │ map_id                   │ BIGINT PK AI │                                     │
+  │ global_product_lot_id    │ BIGINT NN    │ FK → wp_global_product_lots         │
+  │ variant_id               │ BIGINT NN    │ FK → wp_global_product_variants     │
+  │ created_at               │ DATETIME     │                                     │
+  └─────────────────────────┴──────────────┴─────────────────────────────────────┘
+  UNIQUE KEY uk_lot_variant (global_product_lot_id, variant_id)
+  KEY idx_variant (variant_id)
+
+  → 1 lot → N biến thể (VD: "Đỏ" + "Size M" + "1-3 tháng")
+  → 1 biến thể → N lots
+  → UNIQUE KEY ngăn duplicate
+  → INSERT IGNORE batch cho hiệu năng
+
+  wp_global_identify_blocks (GLOBAL)
+  → Khối sản phẩm trong phiếu định danh (workspace)
+  ┌─────────────────────────┬──────────────┬─────────────────────────────────────┐
+  │ Cột                      │ Kiểu         │ Ghi chú                             │
+  ├─────────────────────────┼──────────────┼─────────────────────────────────────┤
+  │ block_id                 │ BIGINT PK AI │                                     │
+  │ ledger_id                │ BIGINT NN    │ FK → local_ledger (type=31)         │
+  │ ledger_blog_id           │ BIGINT       │ Blog chứa ledger                    │
+  │ local_product_name_id    │ BIGINT NN    │ FK → local_product_name             │
+  │ source_blog_id           │ BIGINT       │ Blog chứa product                   │
+  │ variant_ids              │ JSON         │ [3, 7, 12] — biến thể đã chọn      │
+  │ variant_combo_hash       │ VARCHAR(64)  │ MD5(sort(ids).join(','))             │
+  │ codes_count              │ INT DEF 0    │ Cache số mã đã gắn (cập nhật AJAX) │
+  │ block_sort_order         │ INT DEF 0    │ Thứ tự (chưa dùng UI)              │
+  │ block_meta               │ JSON         │ Metadata mở rộng (chưa dùng)       │
+  │ user_id                  │ INTEGER      │                                     │
+  │ is_deleted               │ TINYINT DEF 0│                                     │
+  │ deleted_at               │ DATETIME     │                                     │
+  │ created_at               │ DATETIME     │                                     │
+  │ updated_at               │ DATETIME     │                                     │
+  └─────────────────────────┴──────────────┴─────────────────────────────────────┘
+  KEY idx_ledger (ledger_id, is_deleted)
+  KEY idx_product (local_product_name_id)
+  KEY idx_combo (variant_combo_hash)
+
+  ── 1.3 CỘT MỚI THÊM VÀO wp_global_product_lots (qua migration):
+
+  variant_combo_hash   VARCHAR(64) DEFAULT NULL
+    → MD5 hash của sorted variant IDs: MD5("3,7,12")
+    → Dùng để query nhanh tất cả lot cùng combo biến thể
+    → INDEX: idx_variant_combo_hash
+
+  identifier_ledger_id BIGINT DEFAULT NULL
+    → FK → local_ledger.local_ledger_id (type=31)
+    → Khi gắn mã vào khối, cột này = ledger_id của phiếu định danh
+    → Khi gỡ mã → set NULL
+    → INDEX: idx_identifier_ledger
+
+  ── 1.4 variant_combo_hash HOẠT ĐỘNG NHƯ THẾ NÀO:
+
+  Khi gắn biến thể [3, 7, 12] cho lot:
+    1. sort → [3, 7, 12]
+    2. join → "3,7,12"
+    3. MD5 → "abc123def456..."
+    4. Ghi vào lot.variant_combo_hash VÀ block.variant_combo_hash
+  → Query: WHERE variant_combo_hash = 'abc123...' → lấy tất cả lot cùng combo
+
+  ── 1.5 TẠO BẢNG & MIGRATION:
+
+  Tất cả bảng & migration được quản lý TẬP TRUNG trong class-tgs-database.php (tgs_shop_management):
+    • sql_global_lot_variant_map() → C12
+    • sql_global_identify_blocks() → C13
+    • Migration #24: add variant_combo_hash to wp_global_product_lots
+    • Migration #25: add identifier_ledger_id to wp_global_product_lots
+    • 2 file migration: database/migrations/2026_03_19_000100_... & 2026_03_19_000200_...
+
+  → Khi cần tạo/cập nhật bảng: deactivate → reactivate plugin tgs_shop_management
+  → Tất cả đều idempotent (IF NOT EXISTS / SHOW COLUMNS)
+
+  ── 1.6 product_lot_meta JSON FORMAT:
+
+  Khi sinh mã trống, ghi vào product_lot_meta:
+    {"blank_ledger_id": 123, "generated_by": "tgs_product_identifier"}
+
+  → Dùng LIKE pattern để fallback query khi JSON chưa ghi vào ledger
+  → Helper: blank_ledger_like($id) → '%"blank_ledger_id":NNN,%'
+
+
+================================================================================
+ 2. CẤU TRÚC PLUGIN & FILES
+================================================================================
+
+  wp-content/plugins/tgs_product_identifier/
+  │
+  ├── tgs-product-identifier.php           — ENTRY: constants, init, routes,
+  │                                           sidebar menu, enqueue scripts/styles
+  │
+  ├── includes/
+  │   └── class-identifier-ajax.php         — 23 AJAX handlers, 6 nhóm A-F
+  │                                           (Bảng DB do tgs_shop_management quản lý)
+  │                                           + helpers: verify, json_ok, json_err,
+  │                                             generate_ean13, combo_hash,
+  │                                             blank_ledger_like, table helpers
+  │
+  ├── admin-views/
+  │   ├── blank-codes/
+  │   │   ├── create.php                    — Form sinh mã trống + progress bar
+  │   │   ├── list.php                      — DS phiếu sinh mã (search + pager)
+  │   │   └── detail.php                    — Chi tiết phiếu (stats + lots + print)
+  │   ├── identify/
+  │   │   └── workspace.php                 — MÀN HÌNH CHÍNH — 6 modals tích hợp:
+  │   │                                       #modalNewLedger, #modalAddBlock,
+  │   │                                       #modalScanCodes, #modalViewCodes,
+  │   │                                       #modalQuickVariant, #modalQuickProduct
+  │   └── variants/
+  │       └── list.php                      — CRUD biến thể (search SP + presets)
+  │
+  ├── assets/
+  │   ├── css/
+  │   │   └── identifier.css                — 1 file CSS duy nhất (responsive)
+  │   └── js/
+  │       ├── blank-codes-create.js         — Batch AJAX + progress bar (200/batch)
+  │       ├── blank-codes-list.js           — Load list + search debounce 400ms
+  │       ├── blank-codes-detail.js         — Stats + lots + select/print (GET/POST)
+  │       ├── identify-workspace.js         — ~750 dòng: sidebar, tabs, blocks,
+  │       │                                    scan, modals, mobile toggle
+  │       └── variant-manager.js            — CRUD biến thể + presets
+  │
+  └── ke_hoach_plugin_tgs_product_identifier.text   — FILE NÀY
+
+  TỔNG: 14 files code + 1 file kế hoạch = 15 files
+
+
+================================================================================
+ 3. AJAX ENDPOINTS (23 endpoints, 6 nhóm)
+================================================================================
+
+  Đăng ký: TGS_Identifier_Ajax::register() → wp_ajax_{action}
+  Nonce: tgs_idtf_nonce (verify qua check_ajax_referer)
+  Localize: tgsIdtf = { ajaxUrl, nonce, blogId, userEmail, userName }
+
+  ┌──────┬────────────────────────────────────┬─────────────────────────────────────┐
+  │ Nhóm │ Action                              │ Mô tả                               │
+  ├──────┼────────────────────────────────────┼─────────────────────────────────────┤
+  │  A   │ tgs_idtf_generate_blank_codes       │ Sinh batch mã trống (200/batch)    │
+  │  A   │ tgs_idtf_get_blank_list             │ DS phiếu sinh mã (phân trang)      │
+  │  A   │ tgs_idtf_get_blank_detail           │ Chi tiết + thống kê (có fallback)  │
+  │  A   │ tgs_idtf_get_blank_lots             │ Lots phân trang (JSON + fallback)  │
+  │  A   │ tgs_idtf_prepare_print              │ Lưu barcodes vào transient (>200)  │
+  │  A   │ tgs_idtf_print_blank_codes          │ In mã barcode (standalone HTML)    │
+  ├──────┼────────────────────────────────────┼─────────────────────────────────────┤
+  │  B   │ tgs_idtf_create_identify_ledger     │ Tạo phiếu định danh (type=31)     │
+  │  B   │ tgs_idtf_get_identify_ledgers       │ DS phiếu (sidebar, LIMIT 50)       │
+  │  B   │ tgs_idtf_delete_identify_ledger     │ Xóa phiếu (soft delete)            │
+  │  B   │ tgs_idtf_get_identify_detail        │ Chi tiết + blocks + variants       │
+  ├──────┼────────────────────────────────────┼─────────────────────────────────────┤
+  │  C   │ tgs_idtf_add_product_block          │ Thêm khối SP vào phiếu             │
+  │  C   │ tgs_idtf_remove_product_block       │ Xóa khối (gỡ mã + delete map)     │
+  │  C   │ tgs_idtf_update_block_variants      │ Cập nhật biến thể cho khối        │
+  ├──────┼────────────────────────────────────┼─────────────────────────────────────┤
+  │  D   │ tgs_idtf_scan_code                  │ Quét/validate 1 mã barcode        │
+  │  D   │ tgs_idtf_assign_codes_to_block      │ Gắn N mã (batch UPDATE + INSERT)  │
+  │  D   │ tgs_idtf_unassign_code              │ Gỡ 1 mã (reset → status 200)      │
+  │  D   │ tgs_idtf_get_block_codes            │ Mã trong khối (phân trang 50/pg)  │
+  ├──────┼────────────────────────────────────┼─────────────────────────────────────┤
+  │  E   │ tgs_idtf_search_code                │ Tìm mã nhanh + biến thể           │
+  ├──────┼────────────────────────────────────┼─────────────────────────────────────┤
+  │  F   │ tgs_idtf_get_variants               │ Lấy biến thể theo SP              │
+  │  F   │ tgs_idtf_save_variant               │ CRUD biến thể (check duplicate)   │
+  │  F   │ tgs_idtf_delete_variant             │ Soft delete biến thể              │
+  │  F   │ tgs_idtf_search_products            │ Tìm SP (LIMIT 30)                 │
+  │  F   │ tgs_idtf_quick_create_product       │ Thêm nhanh SP (check unique SKU)  │
+  └──────┴────────────────────────────────────┴─────────────────────────────────────┘
+
+
+================================================================================
+ 4. MÀN HÌNH 1: SINH MÃ TRỐNG
+================================================================================
+
+  URL: ?page=tgs-shop-management&view=idtf-blank-create
+  View: admin-views/blank-codes/create.php
+  JS: assets/js/blank-codes-create.js
+
+  FLOW:
+    1. Form: #blankCodeForm
+       - #blankTitle — Tên phiếu (auto-fill: "Phiếu sinh mã #XXXX — dd/mm/yyyy HH:mm")
+       - #blankQty — Số lượng (1–10.000)
+           + Nút chọn nhanh: 50 | 100 | 200 | 500 | 1.000 | 5.000 (chips)
+           + Ước tính giấy in: "~ X trang giấy" (auto-update)
+       - #blankNote — Ghi chú
+       - Email + ngày giờ auto-fill từ tgsIdtf
+    2. Submit → #btnGenBlank → #genOverlay + progress bar
+    3. BATCH: BATCH_SIZE = 200 → recursive runBatch()
+       - Mỗi batch: POST tgs_idtf_generate_blank_codes
+       - Truyền: offset, ledger_id (từ batch đầu), quantity, blog_id
+       - Response: { offset, total, done, ledger_id }
+       - Cập nhật #genProgressBar, #genProgressCount, #genProgressText
+    4. Khi done=true → redirect tới detail page
+
+  BACKEND:
+    - Batch đầu (offset=0): tạo ledger type=30, sinh ticket_code SMT-XXXXXXXX
+    - Mỗi mã: generate_ean13() → retry 5 lần nếu trùng
+    - INSERT vào wp_global_product_lots: status=200, product_lot_meta JSON
+    - Batch cuối (done=true): query tất cả lot theo blank_ledger_like()
+      → ghi JSON lot_ids vào local_ledger.local_ledger_item_id
+
+  LƯU Ý HIỆU NĂNG:
+    - lot_ids CHỈ ghi 1 lần ở batch cuối (tránh O(n²) read-merge-write)
+    - get_blank_lots() có fallback qua product_lot_meta LIKE nếu JSON chưa ghi
+
+
+================================================================================
+ 5. MÀN HÌNH 2: DANH SÁCH PHIẾU SINH MÃ
+================================================================================
+
+  URL: ?page=tgs-shop-management&view=idtf-blank-list
+  View: admin-views/blank-codes/list.php
+  JS: assets/js/blank-codes-list.js
+
+  - #blankListSearch → debounce 400ms → loadList(1)
+  - Bảng: #blankListBody — STT, Mã phiếu, Tên, Số mã, Người tạo, Ngày, Chi tiết
+  - Phân trang: #blankListPager (20/page, server-side)
+  - Click row → chuyển tới detail
+  - lots_count lấy từ JSON local_ledger_item_id (count)
+
+
+================================================================================
+ 6. MÀN HÌNH 3: CHI TIẾT PHIẾU MÃ
+================================================================================
+
+  URL: ?page=tgs-shop-management&view=idtf-blank-detail&ledger_id=XXX
+  View: admin-views/blank-codes/detail.php
+  JS: assets/js/blank-codes-detail.js
+
+  LAYOUT:
+    ┌─────────────────────────────────────────────────────────┐
+    │ Thông tin: Mã phiếu, Tên, Người tạo, Ngày, Ghi chú    │
+    │ Thống kê: 4 stat cards lớn (hover animation):           │
+    │   [Tổng mã] [Mã trống] [Đã định danh] [Đã bán/xuất]   │
+    │                                                         │
+    │ Toolbar: [Tìm ___] [Chọn tất cả] [Bỏ chọn] [In N mã]  │
+    │                                                         │
+    │ Bảng lots: ☐ STT | Barcode | Trạng thái | SP | Ngày    │
+    │ (100 mã/trang, server-side paging)                      │
+    └─────────────────────────────────────────────────────────┘
+
+  CHỨC NĂNG IN:
+    - < 200 mã: GET trực tiếp → tgs_idtf_print_blank_codes&barcodes=...
+    - >= 200 mã: POST → tgs_idtf_prepare_print → nhận print_key
+      → window.open với print_key → lấy từ transient (5 phút TTL)
+    - Trang in: standalone HTML, JsBarcode EAN-13, @page 70mm×22mm
+    - Mỗi barcode: 35mm×22mm, 2 cột, border dashed, nút "In mã"
+
+  STATS có fallback:
+    - Ưu tiên JSON lot_ids → query IN (nhanh)
+    - Fallback: product_lot_meta LIKE blank_ledger_like() (khi JSON chưa ghi)
+
+
+================================================================================
+ 7. MÀN HÌNH 4: WORKSPACE ĐỊNH DANH SP (MÀN HÌNH CHÍNH)
+================================================================================
+
+  URL: ?page=tgs-shop-management&view=idtf-workspace
+  View: admin-views/identify/workspace.php
+  JS: assets/js/identify-workspace.js (~850 dòng, 14 sections A-N)
+
+  TỔNG QUAN LAYOUT:
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │ [Tìm mã nhanh: _______________________ ] [Tìm kiếm]               │
+  ├───────────┬─────────────────────────────────────────────────────────┤
+  │ SIDEBAR   │  TAB BAR: [Phiếu A] [Phiếu B] [+]                     │
+  │ ●Phiếu A  │──────────────────────────────────────────────────────── │
+  │ ○Phiếu B  │  TÊN: [___] | EMAIL: [___] | NGÀY: [___]              │
+  │ ◌Phiếu C  │  [3 khối · 57 mã đã gắn]                              │
+  │   [Xóa]   │  ┌─ KHỐI 1: Áo trẻ em Hãng A ──────────┐             │
+  │            │  │ Biến thể: [Đỏ] [Size M] [1-3 tháng] │             │
+  │ [+ Mới]   │  │ 🔵 45 mã  [Quét mã] [Xem mã] [Xóa]  │             │
+  │            │  └───────────────────────────────────────┘             │
+  │ TÌM:      │  ┌─ KHỐI 2: Quần jean Hãng B ───────────┐             │
+  │ [________] │  │ (Không biến thể)  ⚪ 0 mã              │             │
+  │            │  └───────────────────────────────────────┘             │
+  │ ● = xanh  │  [+ Thêm khối SP]                                     │
+  │ ○ = vàng  │                                                        │
+  │ ◌ = xám   │                                                        │
+  └───────────┴─────────────────────────────────────────────────────────┘
+
+  SIDEBAR STATUS DOTS:
+    ● Xanh (dot-green)   — phiếu có mã đã gắn (total_codes > 0)
+    ○ Vàng (dot-yellow)  — phiếu có khối nhưng chưa gắn mã
+    ◌ Xám (dot-gray)     — phiếu trống (chưa có khối)
+
+  JS STATE:
+    openTabs[]        — [{ledger_id, title, ticket_code}]
+    activeTab         — ledger_id hiện tại
+    scanPending[]     — [{lot_id, barcode}] đang chờ xác nhận
+    currentScanBlockId — block_id đang quét
+    viewBlockId       — block_id đang xem mã
+    viewCodesPage     — trang hiện tại trong modal xem mã
+
+  JS SECTIONS:
+    A. Sidebar — loadSidebar(), click, delete, search debounce 400ms
+       + Status dot per ledger + total_codes display + better delete confirm
+    B. Tab Management — openLedgerTab(), activateTab(), closeTab(), renderTabs()
+    C. New Ledger Modal — #modalNewLedger, #btnConfirmNewLedger
+    D. Ledger Content — loadLedgerContent(), renderLedgerContent()
+    E. Blocks Rendering — renderBlocks() → card UI + summary badges + empty state
+    F. Add Block Modal — #modalAddBlock, product search, variant chips
+    G. Remove Block — confirm with name + count → gỡ mã + delete map + soft delete
+    H. Scan Codes Modal — #modalScanCodes, debounce 200ms, validate, pending list
+       + BIG COUNTER (#scanBigCount) + SOUND FEEDBACK + FLASH ANIMATION
+    I. View Codes Modal — #modalViewCodes, pager 50/pg, unassign
+    J. Quick Search Bar — #quickSearchCode, tgs_idtf_search_code
+    K. Quick Variant Modal — #modalQuickVariant, presets by type
+    L. Quick Product Modal — #modalQuickProduct, tgs_idtf_quick_create_product
+    M. Mobile Sidebar Toggle — .idtf-sidebar-col.open
+    N. Keyboard Shortcuts — Enter to confirm in modals
+
+  SOUND & AUDIO FEEDBACK (WebAudio API):
+    beepSuccess() — 880Hz sine, 150ms → quét thành công
+    beepError()   — 200Hz+150Hz square bursts → mã không tồn tại / đã bán
+    beepWarning() — 440Hz triangle, 200ms → mã trùng / đã gắn
+    flashScanInput(type) — CSS animation flash trên ô input (green/red/yellow)
+
+  6 MODALS tích hợp trong workspace.php:
+    1. #modalNewLedger     — Tạo phiếu mới (title + note)
+    2. #modalAddBlock      — Thêm khối SP (search → chọn SP → chọn variants)
+    3. #modalScanCodes     — Quét mã barcode (input + validate + pending list)
+    4. #modalViewCodes     — Xem mã đã gắn (table + pager + unassign)
+    5. #modalQuickVariant  — Thêm nhanh biến thể (type + presets + label + value)
+    6. #modalQuickProduct  — Thêm nhanh SP (name + SKU + barcode + price + unit)
+
+  FLOW QUÉT MÃ (Section H):
+    1. Bấm [Quét mã] trên khối → mở #modalScanCodes
+    2. Auto-focus #scanInput → quét barcode (scanner hoặc gõ tay)
+    3. Debounce 200ms hoặc Enter → validateAndAddCode():
+       - Duplicate check trong scanPending[]
+       - AJAX tgs_idtf_scan_code → validate:
+         • not found → alert đỏ
+         • status≠200 → alert vàng (đã gắn SP rồi)
+         • status=200 → thêm vào scanPending[] + alert xanh
+    4. Pending list hiện real-time (gỡ từng mã bằng nút X)
+    5. Bấm [Xác nhận] → AJAX tgs_idtf_assign_codes_to_block:
+       - UPDATE lot: status→1, gắn product_id, combo_hash, identifier_ledger_id
+       - BATCH INSERT IGNORE vào lot_variant_map (tất cả lot × variants 1 query)
+       - UPDATE block.codes_count cache
+    6. Đóng modal → refresh blocks
+
+
+================================================================================
+ 8. MÀN HÌNH 5: QUẢN LÝ BIẾN THỂ
+================================================================================
+
+  URL: ?page=tgs-shop-management&view=idtf-variants
+  View: admin-views/variants/list.php
+  JS: assets/js/variant-manager.js
+
+  FLOW:
+    1. Tìm SP: #varProductSearch → dropdown → selectProduct()
+    2. Load biến thể: loadVariants() → renderVariants()
+    3. Form: #variantForm
+       - #varType: size, color, flavor, weight, age_range, expiry, custom
+       - #varLabel, #varValue, #varSkuSuffix
+       - Presets: chips tự động theo type (VD: size → XS, S, M, L, XL, XXL)
+       - Click chip → fill value
+    4. Submit → tgs_idtf_save_variant (create/update)
+    5. Edit: .btn-edit-var → fill form + show Cancel
+    6. Delete: .btn-delete-var → confirm → soft delete
+
+  PRESETS:
+    size:      ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL']
+    color:     ['Đỏ', 'Xanh', 'Vàng', 'Trắng', 'Đen', 'Hồng', 'Nâu', 'Xám']
+    flavor:    ['Vanilla', 'Chocolate', 'Dâu', 'Cam', 'Nho', 'Bạc hà']
+    weight:    ['100g', '250g', '500g', '1kg', '2kg', '5kg']
+    age_range: ['0-6 tháng', '6-12 tháng', '1-3 tuổi', '3-6 tuổi', '6+']
+    expiry:    [] (nhập tay)
+    custom:    [] (nhập tay)
+
+
+================================================================================
+ 9. SIDEBAR & ROUTES & ENQUEUE
+================================================================================
+
+  ROUTES (hook: tgs_shop_dashboard_routes filter):
+    idtf-blank-create  → blank-codes/create.php
+    idtf-blank-list    → blank-codes/list.php
+    idtf-blank-detail  → blank-codes/detail.php
+    idtf-workspace     → identify/workspace.php
+    idtf-variants      → variants/list.php
+
+  SIDEBAR MENU (hook: tgs_shop_sidebar_menu action):
+    Mã định danh SP (bx-purchase-tag icon)
+      ├── Sinh mã trống        (idtf-blank-create)
+      ├── DS phiếu sinh mã     (idtf-blank-list)
+      ├── Định danh sản phẩm   (idtf-workspace)
+      └── Quản lý biến thể     (idtf-variants)
+
+  ENQUEUE (hook: admin_enqueue_scripts):
+    - Chỉ load khi screen = tgs-shop-management + view = idtf-*
+    - CSS: identifier.css (mọi view)
+    - JS: 1 file/view, deps: [jquery], in footer
+    - Localize: tgsIdtf = { ajaxUrl, nonce, blogId, userEmail, userName }
+
+  CONSTANTS:
+    TGS_IDTF_VERSION             = '1.0.0'
+    TGS_IDTF_DIR                 = plugin_dir_path
+    TGS_IDTF_URL                 = plugin_dir_url
+    TGS_IDTF_VIEWS               = DIR + 'admin-views/'
+    TGS_LEDGER_TYPE_BLANK_CODES  = 30
+    TGS_LEDGER_TYPE_IDENTIFY     = 31
+    TGS_TABLE_GLOBAL_PRODUCT_VARIANTS   = 'wp_global_product_variants'
+    TGS_TABLE_GLOBAL_LOT_VARIANT_MAP    = 'wp_global_lot_variant_map'
+    TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS    = 'wp_global_identify_blocks'
+
+
+================================================================================
+ 10. RESPONSIVE & UI/UX
+================================================================================
+
+  CSS: assets/css/identifier.css (1 file duy nhất)
+
+  DESKTOP:
+    - Sidebar trái 250px, position sticky top 80px
+    - Tab bar horizontal, overflow scroll
+    - Block cards: rounded, shadow nhẹ, spacing 16px
+    - Modals: 600px (centered, scrollable)
+
+  MOBILE (<=768px):
+    - Sidebar: ẩn mặc định, fixed left, slideout .open
+    - Toggle: #btnMobileSidebar (fixed bottom-right)
+    - Tab bar: horizontal scroll
+    - Blocks: full width, stack vertical
+    - Close sidebar khi click outside
+
+  UI PATTERNS:
+    - Toast: .idtf-toast (success/error), 3s auto-dismiss
+    - Dropdown: .idtf-dd-item (product search results)
+    - Variant chips: .idtf-var-chip (.selected → blue)
+    - Preset chips: .idtf-preset-chip (click → fill value)
+    - Quantity chips: .idtf-qty-chip (click → fill quantity + paper estimate)
+    - Badge: .bg-label-warning/success/info/primary/secondary
+    - Status badges: 200=warning, 1=success, 0=info
+    - Stat cards: .idtf-stat-card (detail page, 4 cards hover animation)
+    - Status dots: .idtf-status-dot (sidebar: green/yellow/gray)
+    - Scan counter: .idtf-scan-counter (56px font, prominent number)
+    - Scan flash: .idtf-flash-success/danger/warning (input animation)
+    - Empty states: Dashed border + icon + helpful text
+    - Blocks summary: Badge strip showing total blocks + total codes
+    - Search debounce: 400ms (lists), 200ms (scan), 300ms (product search)
+    - Sound: WebAudio beep (success=880Hz, error=200Hz, warning=440Hz)
+    - Keyboard: Enter = confirm in modals
+    - Delete confirms: Include item name + affected code count
+    - Loading: không có spinner riêng (dùng button disable)
+
+
+================================================================================
+ 11. QUY TẮC BẢO MẬT & HIỆU NĂNG
+================================================================================
+
+  BẢO MẬT:
+    - Nonce verify ở TẤT CẢ endpoints (check_ajax_referer / wp_verify_nonce)
+    - sanitize_text_field() cho mọi input text
+    - intval() cho mọi ID / số
+    - $wpdb->prepare() cho mọi query (chống SQL injection)
+    - esc_js() cho output trong <script>
+    - esc_attr() cho output trong HTML attributes
+    - esc_url() cho URLs
+    - jQuery .text() / esc() helper cho output XSS-safe
+    - Transient cho print (TTL 5 phút, 1 lần dùng → xóa)
+
+  HIỆU NĂNG:
+    - Barcode collision: retry 5 lần (generate_ean13_raw + SELECT 1 LIMIT 1)
+    - Batch INSERT IGNORE cho variant_map (1 query thay N×M)
+    - JSON lot_ids chỉ ghi 1 lần ở batch cuối (tránh O(n²))
+    - Fallback: product_lot_meta LIKE khi JSON chưa ghi
+    - codes_count cache trên block (cập nhật mỗi assign/unassign)
+    - Server-side pagination: 100/page (lots), 50/page (block codes), 20/page (list)
+    - Print: < 200 → GET, >= 200 → transient (tránh URL limit 8KB)
+    - Combo hash: MD5 lookup thay N-way JOIN
+
+
+================================================================================
+ 12. HƯỚNG DẪN NÂNG CẤP & MỞ RỘNG
+================================================================================
+
+  12.1 THÊM TÍNH NĂNG MỚI:
+    - Thêm AJAX endpoint: Thêm vào $actions array + public static function
+    - Thêm view: Thêm route trong tgs-product-identifier.php + tạo .php + .js
+    - Thêm modal: Thêm HTML vào workspace.php + JS section mới
+
+  12.2 KẾT NỐI VỚI HỆ THỐNG BATCH (tương lai):
+    → Khi nhập hàng qua batch, có thể gọi assign_codes_to_block()
+    → Hoặc tạo endpoint mới: tgs_idtf_batch_assign()
+    → Query lots theo combo_hash + product_id để thống kê tồn kho realtime
+
+  12.3 THỐNG KÊ NÂNG CAO (tương lai):
+    → Endpoint: tgs_idtf_get_stats_by_variant()
+    → JOIN lot_variant_map để đếm theo bất kỳ tổ hợp biến thể
+    → Dashboard chart: tồn kho theo variant combo
+
+  12.4 EXPORT (tương lai):
+    → Export danh sách mã theo phiếu (CSV/Excel)
+    → Export barcode PDF (thay standalone HTML)
+
+  12.5 MIGRATION NOTES:
+    - Tất cả migration nằm trong class-tgs-database.php (tgs_shop_management)
+    - Thêm migration: tạo file trong database/migrations/ + đăng ký trong run_migrations()
+    - Deactivate → reactivate tgs_shop_management để chạy migration mới
+
+  12.6 HELPERS QUAN TRỌNG (class-identifier-ajax.php):
+    - verify()              → nonce check, json error
+    - json_ok($data)        → wp_send_json_success
+    - json_err($msg)        → wp_send_json_error
+    - lots_table()          → tên bảng wp_global_product_lots
+    - ledger_table()        → tên bảng wp_X_local_ledger (theo blog_id)
+    - product_table()       → tên bảng wp_X_local_product_name
+    - generate_ean13_raw()  → sinh 1 EAN-13 ngẫu nhiên (không check trùng)
+    - generate_ean13()      → sinh EAN-13 + retry 5 lần nếu trùng DB
+    - combo_hash($ids)      → MD5(sort(ids).join(','))
+    - blank_ledger_like($id)→ LIKE pattern cho product_lot_meta query
+
+  12.7 BACKUP:
+    - Plugin cũ: wp-content/plugins/tgs_lot_generator_old_backup/
+
+
+================================================================================
+ END OF PLAN — TGS Product Identifier v1.0.0
+================================================================================
