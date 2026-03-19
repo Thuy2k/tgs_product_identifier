@@ -333,7 +333,7 @@
     });
 
     function resetAddBlockModal() {
-        $('#blockProductSearch').val('');
+        $('#blockProductSearch').val('').show();
         $('#blockProductId').val('');
         $('#blockProductDropdown').hide().empty();
         $('#blockProductInfo').hide();
