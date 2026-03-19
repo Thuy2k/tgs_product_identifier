@@ -852,7 +852,7 @@
         flavor: ['Vanilla', 'Chocolate', 'Dâu', 'Cam', 'Nho'],
         weight: ['100g', '250g', '500g', '1kg', '2kg'],
         age_range: ['0-6th', '6-12th', '1-3t', '3-6t', '6+'],
-        expiry: [],
+        expiry: ['3th', '6th', '9th', '12th', '18th', '24th', '36th'],
         custom: []
     };
 
@@ -865,13 +865,16 @@
         var type = $(this).val();
         var chips = varPresets[type] || [];
         var $area = $('#qvPresetChips').empty();
-        if (!chips.length) { $('#qvPresetsArea').hide(); return; }
-        $('#qvPresetsArea').show();
-        $.each(chips, function (_, c) {
-            $area.append('<span class="idtf-preset-chip">' + c + '</span>');
-        });
-        // Auto-fill label
+        if (!chips.length) { $('#qvPresetsArea').hide(); } else {
+            $('#qvPresetsArea').show();
+            $.each(chips, function (_, c) {
+                $area.append('<span class="idtf-preset-chip">' + c + '</span>');
+            });
+        }
+        // Auto-fill label + clear value/suffix
         $('#qvLabel').val(varLabelMap[type] || '');
+        $('#qvValue').val('');
+        $('#qvSkuSuffix').val('');
     }).trigger('change');
 
     $(document).on('click', '#qvPresetChips .idtf-preset-chip', function () {

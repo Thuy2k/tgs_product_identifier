@@ -16,7 +16,7 @@
         flavor: { label: 'Hương vị', values: ['Vanilla', 'Chocolate', 'Dâu', 'Cam', 'Nho', 'Bạc hà'] },
         weight: { label: 'Trọng lượng', values: ['100g', '250g', '500g', '1kg', '2kg', '5kg'] },
         age_range: { label: 'Độ tuổi', values: ['0-6 tháng', '6-12 tháng', '1-3 tuổi', '3-6 tuổi', '6+'] },
-        expiry: { label: 'Hạn sử dụng', values: [] },
+        expiry: { label: 'Hạn sử dụng', values: ['3 tháng', '6 tháng', '9 tháng', '12 tháng', '18 tháng', '24 tháng', '36 tháng'] },
         custom: { label: 'Tùy chỉnh', values: [] }
     };
 
@@ -138,19 +138,21 @@
         var type = $(this).val();
         var data = presets[type] || presets.custom;
         var $area = $('#varPresetChips').empty();
-        if (!data.values.length) { $('#varPresetsArea').hide(); return; }
-        $('#varPresetsArea').show();
-        $.each(data.values, function (_, v) {
-            $area.append('<span class="idtf-preset-chip">' + v + '</span>');
-        });
-        if (!editVariantId) {
-            $('#varLabel').val(data.label || '');
+        if (!data.values.length) { $('#varPresetsArea').hide(); } else {
+            $('#varPresetsArea').show();
+            $.each(data.values, function (_, v) {
+                $area.append('<span class="idtf-preset-chip">' + v + '</span>');
+            });
         }
+        // Auto-fill label from type
+        $('#varLabel').val(data.label || '');
     }).trigger('change');
 
-    // Click preset chip → fill value
+    // Click preset chip → fill value + SKU suffix
     $(document).on('click', '#varPresetChips .idtf-preset-chip', function () {
-        $('#varValue').val($(this).text());
+        var val = $(this).text();
+        $('#varValue').val(val);
+        $('#varSkuSuffix').val('-' + val.replace(/\s+/g, '').substring(0, 10));
     });
 
     // Edit button
