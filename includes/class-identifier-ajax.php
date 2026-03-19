@@ -1218,6 +1218,7 @@ class TGS_Identifier_Ajax
 
         $block_id = intval($_POST['block_id'] ?? 0);
         $page     = max(1, intval($_POST['page'] ?? 1));
+        $keyword  = sanitize_text_field($_POST['keyword'] ?? '');
         $per_page = 50;
 
         if ($block_id <= 0) self::json_err('block_id không hợp lệ.');
@@ -1234,10 +1235,16 @@ class TGS_Identifier_Ajax
         $base_params = [$block['local_product_name_id'], $block['ledger_id']];
         if ($combo_hash) $base_params[] = $combo_hash;
 
+        $where_keyword = '';
+        if ($keyword !== '') {
+            $where_keyword = " AND l.global_product_lot_barcode LIKE %s";
+            $base_params[] = '%' . $wpdb->esc_like($keyword) . '%';
+        }
+
         $total = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM " . self::lots_table() . " l
              WHERE l.local_product_name_id = %d AND l.identifier_ledger_id = %d
-               AND l.is_deleted = 0" . $where_combo,
+               AND l.is_deleted = 0" . $where_combo . $where_keyword,
             ...$base_params
         ));
 
@@ -1247,7 +1254,7 @@ class TGS_Identifier_Ajax
                     l.local_product_lot_is_active, l.created_at, l.updated_at
              FROM " . self::lots_table() . " l
              WHERE l.local_product_name_id = %d AND l.identifier_ledger_id = %d
-               AND l.is_deleted = 0" . $where_combo . "
+               AND l.is_deleted = 0" . $where_combo . $where_keyword . "
              ORDER BY l.local_product_lot_is_active DESC, l.updated_at DESC LIMIT %d OFFSET %d",
             ...array_merge($base_params, [$per_page, $offset])
         ), ARRAY_A);

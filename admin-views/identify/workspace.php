@@ -254,6 +254,15 @@ if (!defined('ABSPATH')) exit;
                 <!-- Product info banner -->
                 <div id="viewProductInfo" class="idtf-modal-product-info mb-3" style="display:none;"></div>
 
+                <!-- Quick search in codes -->
+                <div class="mb-3">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text"><i class="bx bx-search"></i></span>
+                        <input type="text" id="viewCodesSearch" class="form-control" placeholder="Tìm mã barcode..." />
+                        <button class="btn btn-outline-secondary" type="button" id="btnViewCodesSearchClear" style="display:none;"><i class="bx bx-x"></i></button>
+                    </div>
+                </div>
+
                 <div class="table-responsive">
                     <table class="table table-sm table-hover mb-0">
                         <thead class="table-light">

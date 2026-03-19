@@ -688,13 +688,44 @@
         viewBlockId = parseInt($(this).data('block-id'));
         viewCodesPage = 1;
         $('#viewBlockId').val(viewBlockId);
+        $('#viewCodesSearch').val('');
+        $('#btnViewCodesSearchClear').hide();
         renderModalProductInfo('#viewProductInfo', viewBlockId);
         loadViewCodes(1);
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalViewCodes')).show();
     });
 
+    // Search within view codes
+    var viewCodesSearchTimer = null;
+    $('#viewCodesSearch').on('input', function () {
+        clearTimeout(viewCodesSearchTimer);
+        var val = $.trim($(this).val());
+        $('#btnViewCodesSearchClear').toggle(val.length > 0);
+        viewCodesSearchTimer = setTimeout(function () {
+            viewCodesPage = 1;
+            loadViewCodes(1);
+        }, 400);
+    });
+    $('#viewCodesSearch').on('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            clearTimeout(viewCodesSearchTimer);
+            viewCodesPage = 1;
+            loadViewCodes(1);
+        }
+    });
+    $('#btnViewCodesSearchClear').on('click', function () {
+        $('#viewCodesSearch').val('').focus();
+        $(this).hide();
+        viewCodesPage = 1;
+        loadViewCodes(1);
+    });
+
     function loadViewCodes(page) {
-        ajax('tgs_idtf_get_block_codes', { block_id: viewBlockId, page: page }, function (d) {
+        var keyword = $.trim($('#viewCodesSearch').val());
+        var params = { block_id: viewBlockId, page: page };
+        if (keyword) params.keyword = keyword;
+        ajax('tgs_idtf_get_block_codes', params, function (d) {
             viewCodesPage = d.page;
             var $tb = $('#viewCodesBody').empty();
             if (!d.lots || !d.lots.length) {
