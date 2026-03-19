@@ -24,6 +24,7 @@
 | local_product_lot_is_active | Trạng thái: 100=trống, 1=đã định danh, 0=đã bán |
 | variant_combo_hash          | MD5 hash của combo biến thể (sort IDs)     |
 | identifier_ledger_id        | ID phiếu định danh đã gắn                  |
+| block_id                    | ID khối SP trong phiếu (FK→identify_blocks) |
 | exp_date                    | Hạn sử dụng (DATE)                         |
 | lot_code                    | Mã lô (VARCHAR 255)                        |
 | to_blog_id                  | Site được gán (shop nào)                    |

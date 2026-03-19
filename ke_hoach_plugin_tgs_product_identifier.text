@@ -1,7 +1,7 @@
 ================================================================================
   KẾ HOẠCH PLUGIN: TGS PRODUCT IDENTIFIER — v1.1.0
   (Sinh mã định danh trống + Định danh sản phẩm + Biến thể kết hợp)
-  Status: ✅ v1.1.0 — Cross-site SKU, Safety Guards, Assignment Lookup
+  Status: ✅ v1.2.0 — Quick Product, Product Codes, block_id, drop variant_id
   Created: 19/03/2026
   Updated: 19/03/2026
   Author: TGS Dev Team
@@ -75,9 +75,12 @@ MỤC LỤC:
       local_product_lot_is_active    TINYINT         -- giống trên (dùng để lọc)
       source_blog_id                 BIGINT          -- blog tạo mã
       to_blog_id                     BIGINT          -- blog nhận mã
-      variant_id                     BIGINT          -- giữ tương thích plugin cũ
+      variant_id                     BIGINT          — ĐÃ XOÁ (migration #30, thay bằng combo_hash+block_id)
       variant_combo_hash             VARCHAR(64)     — CỘT MỚI (migration #24)
       identifier_ledger_id           BIGINT          — CỘT MỚI (migration #25)
+      block_id                       BIGINT          — CỘT MỚI (migration #29) FK→identify_blocks
+      exp_date                       DATE            — HSD (ghi khi assign từ block)
+      lot_code                       VARCHAR(255)    — Mã lô (ghi khi assign từ block)
       product_lot_meta               TEXT            -- JSON lưu blank_ledger_id
       user_id                        INTEGER
       is_deleted                     TINYINT
@@ -145,6 +148,8 @@ MỤC LỤC:
   │ variant_ids              │ JSON         │ [3, 7, 12] — biến thể đã chọn      │
   │ variant_combo_hash       │ VARCHAR(64)  │ MD5(sort(ids).join(','))             │
   │ codes_count              │ INT DEF 0    │ Cache số mã đã gắn (cập nhật AJAX) │
+  │ exp_date                 │ DATE         │ MỚI (#28): Hạn sử dụng (HSD)         │
+  │ lot_code                 │ VARCHAR(255) │ MỚI (#28): Mã lô                      │
   │ block_sort_order         │ INT DEF 0    │ Thứ tự (chưa dùng UI)              │
   │ block_meta               │ JSON         │ Metadata mở rộng (chưa dùng)       │
   │ user_id                  │ INTEGER      │                                     │
@@ -190,11 +195,18 @@ MỤC LỤC:
     • Migration #26: add local_product_sku + local_product_barcode_main to wp_global_product_variants
     • Migration #27: add local_product_sku + local_product_barcode_main to wp_global_identify_blocks
       + back-fill SKU/barcode từ product table cho các block đã tồn tại
+    • Migration #28: add exp_date + lot_code to wp_global_identify_blocks
+    • Migration #29: add block_id to wp_global_product_lots (liên kết lot→block chính xác)
+      + back-fill block_id từ identify_blocks cho lots đã tồn tại
+    • Migration #30: drop variant_id from wp_global_product_lots (thay bằng combo_hash+block_id)
     • 4 file migration: database/migrations/
       2026_03_19_000100_add_variant_combo_hash_to_lots.php
       2026_03_19_000200_add_identifier_ledger_id_to_lots.php
       2026_03_19_000300_add_sku_barcode_to_global_product_variants.php
       2026_03_19_000400_add_sku_barcode_to_global_identify_blocks.php
+      2026_03_19_000500_add_exp_date_lot_code_to_global_identify_blocks.php
+      2026_03_19_000600_add_block_id_to_global_product_lots.php
+      2026_03_19_000700_drop_variant_id_from_global_product_lots.php
 
   → Khi cần tạo/cập nhật bảng: deactivate → reactivate plugin tgs_shop_management
   → Tất cả đều idempotent (IF NOT EXISTS / SHOW COLUMNS)
@@ -293,7 +305,13 @@ MỤC LỤC:
   │  F   │ tgs_idtf_save_variant               │ CRUD biến thể (check duplicate)   │
   │  F   │ tgs_idtf_delete_variant             │ Soft delete biến thể              │
   │  F   │ tgs_idtf_search_products            │ Tìm SP (LIMIT 30)                 │
-  │  F   │ tgs_idtf_quick_create_product       │ Thêm nhanh SP (check unique SKU)  │
+  │  F   │ tgs_idtf_quick_create_product       │ Thêm nhanh SP (full: tên, SKU,    │
+  │      │                                      │ barcode, mô tả, giá/thuế, đv)     │
+  │  F   │ tgs_idtf_generate_sku               │ Tạo SKU ngẫu nhiên 9 số (unique) │
+  ├──────┼────────────────────────────────────┼─────────────────────────────────────┤
+  │  G   │ tgs_idtf_get_product_codes_list     │ DS sản phẩm + số mã + combos     │
+  │  G   │ tgs_idtf_get_product_codes_detail   │ Mã theo SP + combo (filter HSD/lô)│
+  │  G   │ tgs_idtf_export_product_codes       │ Export Excel mã định danh        │
   └──────┴────────────────────────────────────┴─────────────────────────────────────┘
 
 
@@ -443,7 +461,12 @@ MỤC LỤC:
     K. Quick Variant Modal — #modalQuickVariant, presets by type
        + Auto-fill label theo type, SKU suffix field
        + Modal elevated (z-index cao hơn để mở trên modal add-block)
-    L. Quick Product Modal — #modalQuickProduct, tgs_idtf_quick_create_product
+    L. Quick Product Modal — #modalQuickProduct (modal-lg, 2 cột)
+       + Cột trái: tên SP (pre-fill từ search), SKU (auto-gen + refresh),
+         barcode NSX, đơn vị (select), mô tả ngắn
+       + Cột phải: giá sau thuế, VAT% (default 8), giá trước thuế (tự tính),
+         badge "Theo dõi lô hàng: Luôn bật"
+       + Flow: Ẩn addBlock → mở quickProduct → tạo xong → đóng → mở lại addBlock với SP đã fill
     M. Mobile Sidebar Toggle — .idtf-sidebar-col.open
     N. Keyboard Shortcuts — Enter to confirm in modals
 
@@ -751,7 +774,7 @@ MỤC LỤC:
     - Tất cả migration nằm trong class-tgs-database.php (tgs_shop_management)
     - Thêm migration: tạo file trong database/migrations/ + đăng ký trong run_migrations()
     - Deactivate → reactivate tgs_shop_management để chạy migration mới
-    - Hiện có 4 migration (#24-#27) cho plugin này
+    - Hiện có 7 migration (#24-#30) cho plugin này
 
   14.6 HELPERS QUAN TRỌNG (class-identifier-ajax.php):
     - verify()                    → nonce check, json error
@@ -766,11 +789,12 @@ MỤC LỤC:
     - combo_hash($ids)            → MD5(sort(ids).join(','))
     - blank_ledger_like($id)      → LIKE pattern cho product_lot_meta query
     - lookup_lot_assignment($lot) → tra cứu phiếu + khối chứa lot (v1.1)
+    - generate_sku()              → SKU ngẫu nhiên 9 số (1+8 digits, unique)
 
   14.7 BACKUP:
     - Plugin cũ: wp-content/plugins/tgs_lot_generator_old_backup/
 
 
 ================================================================================
- END OF PLAN — TGS Product Identifier v1.1.0
+ END OF PLAN — TGS Product Identifier v1.2.0
 ================================================================================
