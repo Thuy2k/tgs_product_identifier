@@ -363,41 +363,98 @@ if (!defined('ABSPATH')) exit;
 
 <!-- MODAL: Thêm nhanh SP -->
 <div class="modal fade" id="modalQuickProduct" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content idtf-modal-elevated">
             <div class="modal-header">
-                <h5 class="modal-title">Thêm nhanh sản phẩm</h5>
+                <h5 class="modal-title"><i class="bx bx-package me-1"></i>Thêm nhanh sản phẩm</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Tên sản phẩm <span class="text-danger">*</span></label>
-                    <input type="text" id="qpName" class="form-control" />
-                </div>
-                <div class="row mb-3">
-                    <div class="col-6">
-                        <label class="form-label fw-semibold">SKU <span class="text-danger">*</span></label>
-                        <input type="text" id="qpSku" class="form-control" />
+                <div class="row g-3">
+                    <!-- CỘT TRÁI: Thông tin SP -->
+                    <div class="col-md-7">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Tên sản phẩm <span class="text-danger">*</span></label>
+                            <input type="text" id="qpName" class="form-control" placeholder="VD: Sữa Ensure Gold 850g" />
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-8">
+                                <label class="form-label fw-semibold">Mã SKU <span class="text-danger">*</span></label>
+                                <div class="input-group">
+                                    <input type="text" id="qpSku" class="form-control" readonly />
+                                    <button class="btn btn-outline-secondary" type="button" id="btnQpRefreshSku" title="Tạo SKU mới">
+                                        <i class="bx bx-refresh"></i>
+                                    </button>
+                                </div>
+                                <div class="form-text text-muted">SKU tự động — bấm <i class="bx bx-refresh"></i> để đổi</div>
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label fw-semibold">Đơn vị</label>
+                                <select id="qpUnit" class="form-select">
+                                    <option value="Lon">Lon</option>
+                                    <option value="Hộp">Hộp</option>
+                                    <option value="Chai">Chai</option>
+                                    <option value="Gói">Gói</option>
+                                    <option value="Túi">Túi</option>
+                                    <option value="Thùng">Thùng</option>
+                                    <option value="Cái" selected>Cái</option>
+                                    <option value="Chiếc">Chiếc</option>
+                                    <option value="Kg">Kg</option>
+                                    <option value="Lít">Lít</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Barcode nhà sản xuất</label>
+                            <input type="text" id="qpBarcode" class="form-control" placeholder="Nhập barcode trên bao bì (nếu có)" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Mô tả ngắn</label>
+                            <textarea id="qpDescription" class="form-control" rows="2" placeholder="Mô tả ngắn gọn về sản phẩm..."></textarea>
+                        </div>
                     </div>
-                    <div class="col-6">
-                        <label class="form-label fw-semibold">Đơn vị</label>
-                        <input type="text" id="qpUnit" class="form-control" value="Cái" />
-                    </div>
-                </div>
-                <div class="row mb-3">
-                    <div class="col-6">
-                        <label class="form-label fw-semibold">Barcode</label>
-                        <input type="text" id="qpBarcode" class="form-control" />
-                    </div>
-                    <div class="col-6">
-                        <label class="form-label fw-semibold">Giá bán</label>
-                        <input type="number" id="qpPrice" class="form-control" value="0" />
+                    <!-- CỘT PHẢI: Giá & trạng thái -->
+                    <div class="col-md-5">
+                        <div class="card border-0 bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title mb-3"><i class="bx bx-money me-1"></i>Thông tin giá</h6>
+                                <div class="mb-3">
+                                    <label class="form-label fw-semibold">Giá bán (sau thuế) <span class="text-danger">*</span></label>
+                                    <div class="input-group">
+                                        <input type="number" id="qpPriceAfterTax" class="form-control" value="0" min="0" step="1000" />
+                                        <span class="input-group-text">₫</span>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-semibold">Thuế VAT</label>
+                                    <div class="input-group">
+                                        <input type="number" id="qpTax" class="form-control" value="8" min="0" max="100" step="1" />
+                                        <span class="input-group-text">%</span>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-semibold">Giá trước thuế</label>
+                                    <div class="input-group">
+                                        <input type="number" id="qpPriceBeforeTax" class="form-control" value="0" readonly />
+                                        <span class="input-group-text">₫</span>
+                                    </div>
+                                    <div class="form-text text-muted">Tự tính = Giá sau thuế ÷ (1 + VAT%)</div>
+                                </div>
+                                <hr>
+                                <div class="d-flex align-items-center justify-content-between">
+                                    <span class="fw-semibold"><i class="bx bx-box me-1"></i>Theo dõi lô hàng</span>
+                                    <span class="badge bg-success"><i class="bx bx-check me-1"></i>Luôn bật</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
-                <button class="btn btn-primary" id="btnQpSave"><i class="bx bx-save me-1"></i>Thêm SP</button>
+                <button class="btn btn-primary" id="btnQpSave">
+                    <i class="bx bx-check me-1"></i>Tạo sản phẩm & chọn ngay
+                </button>
             </div>
         </div>
     </div>

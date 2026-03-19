@@ -48,6 +48,7 @@ class TGS_Identifier_Ajax
             'tgs_idtf_delete_variant',
             'tgs_idtf_search_products',
             'tgs_idtf_quick_create_product',
+            'tgs_idtf_generate_sku',
             // G: Product codes (thống kê mã theo SP + biến thể)
             'tgs_idtf_get_product_codes_list',
             'tgs_idtf_get_product_codes_detail',
@@ -294,7 +295,6 @@ class TGS_Identifier_Ajax
                 'local_product_lot_is_active'  => 100,
                 'source_blog_id'               => $blog_id,
                 'to_blog_id'                   => $blog_id,
-                'variant_id'                   => null,
                 'variant_combo_hash'           => null,
                 'identifier_ledger_id'         => null,
                 'user_id'                      => $user_id,
@@ -956,7 +956,6 @@ class TGS_Identifier_Ajax
                  SET local_product_lot_is_active = 100,
                      local_product_name_id = NULL,
                      local_product_sku = NULL,
-                     variant_id = NULL,
                      variant_combo_hash = NULL,
                      identifier_ledger_id = NULL,
                      block_id = NULL,
@@ -1512,16 +1511,44 @@ class TGS_Identifier_Ajax
         self::json_ok(['products' => $rows ?: []]);
     }
 
+    /**
+     * Tạo mã SKU ngẫu nhiên 9 chữ số (bắt đầu bằng 1), kiểm tra unique
+     */
+    public static function tgs_idtf_generate_sku()
+    {
+        self::verify();
+        global $wpdb;
+
+        $table = self::product_table();
+
+        for ($i = 0; $i < 10; $i++) {
+            $sku = '1' . str_pad(wp_rand(0, 99999999), 8, '0', STR_PAD_LEFT);
+            $exists = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$table} WHERE local_product_sku = %s AND (is_deleted IS NULL OR is_deleted = 0)",
+                $sku
+            ));
+            if ((int) $exists === 0) {
+                self::json_ok(['sku' => $sku]);
+                return;
+            }
+        }
+
+        self::json_err('Không thể tạo SKU duy nhất sau 10 lần thử.');
+    }
+
     public static function tgs_idtf_quick_create_product()
     {
         self::verify();
         global $wpdb;
 
-        $name    = sanitize_text_field($_POST['product_name'] ?? '');
-        $sku     = sanitize_text_field($_POST['product_sku'] ?? '');
-        $barcode = sanitize_text_field($_POST['product_barcode'] ?? '');
-        $price   = floatval($_POST['product_price_after_tax'] ?? 0);
-        $unit    = sanitize_text_field($_POST['product_unit'] ?? 'Cái');
+        $name        = sanitize_text_field($_POST['product_name'] ?? '');
+        $sku         = sanitize_text_field($_POST['product_sku'] ?? '');
+        $barcode     = sanitize_text_field($_POST['product_barcode'] ?? '');
+        $description = sanitize_textarea_field($_POST['product_description'] ?? '');
+        $price_after = floatval($_POST['product_price_after_tax'] ?? 0);
+        $tax         = floatval($_POST['product_tax'] ?? 8);
+        $price       = floatval($_POST['product_price'] ?? 0);
+        $unit        = sanitize_text_field($_POST['product_unit'] ?? 'Cái');
 
         if (empty($name)) self::json_err('Tên sản phẩm không được trống.');
         if (empty($sku))  self::json_err('Mã SKU không được trống.');
@@ -1535,15 +1562,30 @@ class TGS_Identifier_Ajax
         ));
         if ($exists > 0) self::json_err('Mã SKU đã tồn tại.');
 
-        $now = current_time('mysql');
+        $now  = current_time('mysql');
+        $meta = wp_json_encode([
+            'sku'     => $sku,
+            'weight'  => 0,
+            'unit'    => $unit,
+            'brand'   => '',
+            'origin'  => '',
+            'gallery' => [],
+            'created_via' => 'tgs_product_identifier_quick_create',
+        ], JSON_UNESCAPED_UNICODE);
+
         $wpdb->insert($table, [
             'local_product_name'            => $name,
             'local_product_sku'             => $sku,
             'local_product_barcode_main'    => $barcode,
-            'local_product_price_after_tax' => $price,
+            'local_product_description'     => $description,
+            'local_product_price'           => $price,
+            'local_product_tax'             => $tax,
+            'local_product_price_after_tax' => $price_after,
             'local_product_unit'            => $unit,
             'local_product_status'          => 'active',
             'local_product_is_tracking'     => 1,
+            'local_product_meta'            => $meta,
+            'local_product_thumbnail'       => '',
             'user_id'                       => get_current_user_id(),
             'is_deleted'                    => 0,
             'created_at'                    => $now,
@@ -1559,11 +1601,11 @@ class TGS_Identifier_Ajax
                 'local_product_name'            => $name,
                 'local_product_sku'             => $sku,
                 'local_product_barcode_main'    => $barcode,
-                'local_product_price_after_tax' => $price,
+                'local_product_price_after_tax' => $price_after,
                 'local_product_unit'            => $unit,
                 'local_product_is_tracking'     => 1,
             ]
-        ], 'Đã thêm sản phẩm.');
+        ], 'Đã thêm sản phẩm "' . $name . '" thành công!');
     }
 
     /* =========================================================================

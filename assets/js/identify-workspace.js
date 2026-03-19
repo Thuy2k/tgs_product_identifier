@@ -486,6 +486,17 @@
     }
 
     $(document).on('click', '#ddAddProduct', function () {
+        // Pre-fill name from search text
+        var searchText = $.trim($('#blockProductSearch').val());
+        $('#qpName').val(searchText);
+        // Auto-generate SKU
+        fetchNewSku();
+        // Reset other fields
+        $('#qpBarcode, #qpDescription').val('');
+        $('#qpPriceAfterTax').val(0);
+        $('#qpTax').val(8);
+        $('#qpPriceBeforeTax').val(0);
+        $('#qpUnit').val('Cái');
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalQuickProduct')).show();
     });
 
@@ -965,24 +976,57 @@
     /* =====================================================================
      * L. QUICK PRODUCT MODAL
      * ===================================================================== */
+
+    /* --- SKU generation --- */
+    function fetchNewSku() {
+        $('#qpSku').val('Đang tạo...');
+        ajax('tgs_idtf_generate_sku', {}, function (d) {
+            $('#qpSku').val(d.sku || '');
+        }, function () {
+            // Fallback: generate client-side
+            var sku = '1' + String(Math.floor(Math.random() * 100000000)).padStart(8, '0');
+            $('#qpSku').val(sku);
+        });
+    }
+
+    $('#btnQpRefreshSku').on('click', function () {
+        fetchNewSku();
+    });
+
+    /* --- Price calculation --- */
+    function calcPriceBeforeTax() {
+        var priceAfter = parseFloat($('#qpPriceAfterTax').val()) || 0;
+        var tax = parseFloat($('#qpTax').val()) || 0;
+        var priceBefore = tax > 0 ? Math.round(priceAfter / (1 + tax / 100)) : priceAfter;
+        $('#qpPriceBeforeTax').val(priceBefore);
+    }
+
+    $('#qpPriceAfterTax, #qpTax').on('input change', calcPriceBeforeTax);
+
+    /* --- Save product --- */
     $('#btnQpSave').on('click', function () {
-        var $btn = $(this).prop('disabled', true);
+        var $btn = $(this).prop('disabled', true).html('<i class="bx bx-loader-alt bx-spin me-1"></i>Đang tạo...');
+
+        calcPriceBeforeTax();
+
         ajax('tgs_idtf_quick_create_product', {
-            product_name: $.trim($('#qpName').val()),
-            product_sku: $.trim($('#qpSku').val()),
-            product_barcode: $.trim($('#qpBarcode').val()),
-            product_price_after_tax: $('#qpPrice').val(),
-            product_unit: $.trim($('#qpUnit').val())
+            product_name:           $.trim($('#qpName').val()),
+            product_sku:            $.trim($('#qpSku').val()),
+            product_barcode:        $.trim($('#qpBarcode').val()),
+            product_description:    $.trim($('#qpDescription').val()),
+            product_price_after_tax: $('#qpPriceAfterTax').val(),
+            product_tax:            $('#qpTax').val(),
+            product_price:          $('#qpPriceBeforeTax').val(),
+            product_unit:           $('#qpUnit').val()
         }, function (d) {
-            $btn.prop('disabled', false);
+            $btn.prop('disabled', false).html('<i class="bx bx-check me-1"></i>Tạo sản phẩm & chọn ngay');
             bootstrap.Modal.getInstance(document.getElementById('modalQuickProduct')).hide();
-            toast('Đã thêm sản phẩm.');
+            toast('✅ ' + (d.message || 'Đã tạo sản phẩm!'));
             // Select newly created product in the Add Block modal
             if (d.product) selectBlockProduct(d.product);
-            $('#qpName, #qpSku, #qpBarcode').val('');
-            $('#qpPrice').val(0);
-            $('#qpUnit').val('Cái');
-        }, function () { $btn.prop('disabled', false); });
+        }, function () {
+            $btn.prop('disabled', false).html('<i class="bx bx-check me-1"></i>Tạo sản phẩm & chọn ngay');
+        });
     });
 
     /* =====================================================================
