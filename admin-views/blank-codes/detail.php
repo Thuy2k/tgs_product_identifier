@@ -71,6 +71,15 @@ $ledger_id = intval($_GET['ledger_id'] ?? 0);
                     <span class="input-group-text"><i class="bx bx-search"></i></span>
                     <input type="text" id="lotSearch" class="form-control form-control-sm" placeholder="Tìm mã barcode..." />
                 </div>
+                <div class="input-group" style="max-width:160px;">
+                    <span class="input-group-text" style="font-size:12px;">Hiển thị</span>
+                    <select id="lotPerPage" class="form-select form-select-sm">
+                        <option value="20">20</option>
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="200">200</option>
+                    </select>
+                </div>
                 <button type="button" class="btn btn-sm btn-outline-primary" id="btnSelectAll">Chọn tất cả</button>
                 <button type="button" class="btn btn-sm btn-outline-secondary" id="btnDeselectAll">Bỏ chọn</button>
                 <span class="badge bg-label-primary" id="selectedBadge" style="display:none;">Đã chọn: <b id="selectedCount">0</b></span>
@@ -94,11 +103,13 @@ $ledger_id = intval($_GET['ledger_id'] ?? 0);
                         <th>Trạng thái</th>
                         <th>Sản phẩm</th>
                         <th>Biến thể</th>
+                        <th>HSD</th>
+                        <th>Mã lô</th>
                         <th>Ngày tạo</th>
                     </tr>
                 </thead>
                 <tbody id="lotsTableBody">
-                    <tr><td colspan="7" class="text-center py-4 text-muted">Đang tải...</td></tr>
+                    <tr><td colspan="9" class="text-center py-4 text-muted">Đang tải...</td></tr>
                 </tbody>
             </table>
         </div>

@@ -495,6 +495,7 @@ class TGS_Identifier_Ajax
             "SELECT l.global_product_lot_id, l.global_product_lot_barcode,
                     l.local_product_name_id, l.local_product_lot_is_active,
                     l.variant_combo_hash, l.identifier_ledger_id, l.created_at,
+                    l.exp_date, l.lot_code,
                     p.local_product_name
              FROM {$lots_tbl} l
              LEFT JOIN {$prod_tbl} p
@@ -852,6 +853,8 @@ class TGS_Identifier_Ajax
         $product_id = intval($_POST['product_id'] ?? 0);
         $blog_id    = intval($_POST['blog_id'] ?? get_current_blog_id());
         $variant_ids = json_decode(stripslashes($_POST['variant_ids'] ?? '[]'), true) ?: [];
+        $exp_date   = sanitize_text_field($_POST['exp_date'] ?? '');
+        $lot_code   = sanitize_text_field($_POST['lot_code'] ?? '');
 
         if ($ledger_id <= 0) self::json_err('ledger_id không hợp lệ.');
         if ($product_id <= 0) self::json_err('Chưa chọn sản phẩm.');
@@ -872,6 +875,8 @@ class TGS_Identifier_Ajax
             'source_blog_id'             => $blog_id,
             'local_product_sku'          => $product['local_product_sku'] ?? null,
             'local_product_barcode_main' => $product['local_product_barcode_main'] ?? null,
+            'exp_date'                   => $exp_date !== '' ? $exp_date : null,
+            'lot_code'                   => $lot_code !== '' ? $lot_code : null,
             'variant_ids'                => wp_json_encode(array_map('intval', $variant_ids)),
             'variant_combo_hash'         => $combo_hash,
             'codes_count'                => 0,
@@ -958,6 +963,8 @@ class TGS_Identifier_Ajax
                      variant_id = NULL,
                      variant_combo_hash = NULL,
                      identifier_ledger_id = NULL,
+                     exp_date = NULL,
+                     lot_code = NULL,
                      updated_at = %s
                  WHERE global_product_lot_id IN ({$ph})",
                 ...array_merge([$now], $lots)
@@ -1095,6 +1102,8 @@ class TGS_Identifier_Ajax
         $ledger_id   = $block['ledger_id'];
         $variant_ids = json_decode($block['variant_ids'] ?? '[]', true) ?: [];
         $combo_hash  = $block['variant_combo_hash'];
+        $block_exp   = $block['exp_date'] ?: null;
+        $block_lot   = $block['lot_code'] ?: null;
         $now         = current_time('mysql');
         $assigned    = 0;
 
@@ -1112,6 +1121,8 @@ class TGS_Identifier_Ajax
                 'variant_combo_hash'           => $combo_hash,
                 'identifier_ledger_id'         => $ledger_id,
                 'to_blog_id'                   => $block['source_blog_id'],
+                'exp_date'                     => $block_exp,
+                'lot_code'                     => $block_lot,
                 'updated_at'                   => $now,
             ], [
                 'global_product_lot_id'        => $lot_id,
@@ -1205,6 +1216,8 @@ class TGS_Identifier_Ajax
             'local_product_sku'            => null,
             'variant_combo_hash'           => null,
             'identifier_ledger_id'         => null,
+            'exp_date'                     => null,
+            'lot_code'                     => null,
             'updated_at'                   => $now,
         ], [
             'global_product_lot_id' => $lot_id,
@@ -1286,7 +1299,8 @@ class TGS_Identifier_Ajax
         $offset = ($page - 1) * $per_page;
         $rows = $wpdb->get_results($wpdb->prepare(
             "SELECT l.global_product_lot_id, l.global_product_lot_barcode,
-                    l.local_product_lot_is_active, l.created_at, l.updated_at
+                    l.local_product_lot_is_active, l.created_at, l.updated_at,
+                    l.exp_date, l.lot_code
              FROM " . self::lots_table() . " l
              WHERE l.local_product_name_id = %d AND l.identifier_ledger_id = %d
                AND l.is_deleted = 0" . $where_combo . $where_keyword . "

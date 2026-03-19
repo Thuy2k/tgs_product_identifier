@@ -181,6 +181,32 @@ if (!defined('ABSPATH')) exit;
                         <i class="bx bx-plus me-1"></i>Thêm nhanh biến thể
                     </button>
                 </div>
+
+                <!-- HSD + Mã lô (tuỳ chọn) -->
+                <div class="mt-3 pt-3 border-top">
+                    <div class="d-flex align-items-center mb-2">
+                        <i class="bx bx-calendar me-1 text-muted"></i>
+                        <span class="fw-semibold" style="font-size:13px;">HSD &amp; Mã lô <small class="text-muted fw-normal ms-1">(tuỳ chọn)</small></span>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <label class="form-label mb-1" style="font-size:12px;">Hạn sử dụng (HSD)</label>
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text"><i class="bx bx-calendar"></i></span>
+                                <input type="text" id="blockExpDateDisplay" class="form-control" placeholder="dd/mm/yyyy" maxlength="10" />
+                                <input type="date" id="blockExpDatePicker" class="form-control" style="max-width:42px; padding:0; opacity:0.01; cursor:pointer;" tabindex="-1" />
+                            </div>
+                            <input type="hidden" id="blockExpDate" value="" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label mb-1" style="font-size:12px;">Mã lô</label>
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text"><i class="bx bx-purchase-tag"></i></span>
+                                <input type="text" id="blockLotCode" class="form-control" placeholder="VD: LOT2025-A1..." />
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>

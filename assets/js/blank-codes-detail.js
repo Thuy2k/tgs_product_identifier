@@ -7,6 +7,7 @@
 
     var ledgerId = parseInt($('#detailLedgerId').val(), 10);
     var currentPage = 1;
+    var perPage = parseInt($('#lotPerPage').val(), 10) || 100;
     var selected = {};   // lot_id → barcode
     var searchTimer = null;
 
@@ -20,6 +21,13 @@
     $('#lotSearch').on('input', function () {
         clearTimeout(searchTimer);
         searchTimer = setTimeout(function () { currentPage = 1; loadLots(1); }, 400);
+    });
+
+    /* ── Per page ──────────────────────────────────────────────── */
+    $('#lotPerPage').on('change', function () {
+        perPage = parseInt($(this).val(), 10) || 100;
+        currentPage = 1;
+        loadLots(1);
     });
 
     /* ── Select / Deselect ─────────────────────────────────────── */
@@ -120,7 +128,7 @@
             nonce: tgsIdtf.nonce,
             ledger_id: ledgerId,
             page: page,
-            per_page: 100,
+            per_page: perPage,
             search: $.trim($('#lotSearch').val())
         })
         .done(function (res) {
@@ -136,7 +144,7 @@
     function renderLots(rows) {
         var $tb = $('#lotsTableBody').empty();
         if (!rows || !rows.length) {
-            $tb.html('<tr><td colspan="7" class="text-center py-4 text-muted">Không có dữ liệu.</td></tr>');
+            $tb.html('<tr><td colspan="9" class="text-center py-4 text-muted">Không có dữ liệu.</td></tr>');
             return;
         }
 
@@ -154,14 +162,22 @@
                 });
             }
 
+            var expStr = '—';
+            if (r.exp_date) {
+                var ep = r.exp_date.split('-');
+                expStr = ep[2] + '/' + ep[1] + '/' + ep[0];
+            }
+
             $tb.append(
                 '<tr class="lot-row' + (isChecked ? ' selected' : '') + '">'
                 + '<td><input type="checkbox" class="form-check-input lot-check" data-lotid="' + r.global_product_lot_id + '" data-barcode="' + esc(r.global_product_lot_barcode) + '"' + isChecked + ' /></td>'
-                + '<td>' + ((currentPage - 1) * 100 + i + 1) + '</td>'
+                + '<td>' + ((currentPage - 1) * perPage + i + 1) + '</td>'
                 + '<td><code>' + esc(r.global_product_lot_barcode) + '</code></td>'
                 + '<td>' + badge + '</td>'
                 + '<td>' + esc(r.local_product_name || '—') + '</td>'
                 + '<td>' + varTags + '</td>'
+                + '<td>' + expStr + '</td>'
+                + '<td>' + esc(r.lot_code || '—') + '</td>'
                 + '<td>' + dateStr + '</td>'
                 + '</tr>'
             );

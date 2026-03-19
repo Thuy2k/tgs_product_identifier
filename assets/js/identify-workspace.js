@@ -72,6 +72,15 @@
             });
         }
 
+        var metaBadges = '';
+        if (b.exp_date) {
+            var ep = b.exp_date.split('-');
+            metaBadges += '<span class="badge bg-label-warning me-1" style="font-size:11px;"><i class="bx bx-calendar me-1"></i>HSD: ' + ep[2] + '/' + ep[1] + '/' + ep[0] + '</span>';
+        }
+        if (b.lot_code) {
+            metaBadges += '<span class="badge bg-label-info me-1" style="font-size:11px;"><i class="bx bx-purchase-tag me-1"></i>Lô: ' + esc(b.lot_code) + '</span>';
+        }
+
         $el.html(
             '<div class="d-flex align-items-start gap-2">'
             + '<i class="bx bx-package" style="font-size:22px; color:#696cff; margin-top:2px;"></i>'
@@ -80,6 +89,7 @@
             + '  <div style="font-size:11px; color:#8592a3;">SKU: <b>' + esc(b.local_product_sku || '—') + '</b>'
             + (b.local_product_barcode_main ? ' · Barcode: ' + esc(b.local_product_barcode_main) : '') + '</div>'
             + (varHtml ? '<div class="mt-1">' + varHtml + '</div>' : '')
+            + (metaBadges ? '<div class="mt-1">' + metaBadges + '</div>' : '')
             + '</div>'
             + '</div>'
         ).show();
@@ -348,6 +358,15 @@
             }
             var count = parseInt(b.codes_count) || 0;
 
+            var metaLine = '';
+            if (b.exp_date) {
+                var ep = b.exp_date.split('-');
+                metaLine += '<span class="badge bg-label-warning me-1" style="font-size:10px;"><i class="bx bx-calendar me-1"></i>HSD: ' + ep[2] + '/' + ep[1] + '/' + ep[0] + '</span>';
+            }
+            if (b.lot_code) {
+                metaLine += '<span class="badge bg-label-info me-1" style="font-size:10px;"><i class="bx bx-purchase-tag me-1"></i>Lô: ' + esc(b.lot_code) + '</span>';
+            }
+
             $c.append(
                 '<div class="idtf-block" data-block-id="' + b.block_id + '">'
                 + '<div class="idtf-block-header">'
@@ -361,6 +380,7 @@
                 + '</div>'
                 + '<div class="idtf-block-body">'
                 + '  <div class="idtf-block-variants">' + (varTags || '<span class="text-muted" style="font-size:12px;"><i class="bx bx-info-circle me-1"></i>Không có biến thể</span>') + '</div>'
+                + (metaLine ? '<div class="mt-1">' + metaLine + '</div>' : '')
                 + '</div>'
                 + '<div class="idtf-block-actions">'
                 + '  <button class="btn btn-sm btn-primary btn-scan" data-block-id="' + b.block_id + '"><i class="bx bx-qr-scan me-1"></i>Quét mã</button>'
@@ -391,9 +411,42 @@
         $('#blockVariantSection').hide();
         $('#blockVariantList').empty();
         $('#btnConfirmAddBlock').prop('disabled', true);
+        $('#blockExpDateDisplay').val('');
+        $('#blockExpDatePicker').val('');
+        $('#blockExpDate').val('');
+        $('#blockLotCode').val('');
         blockVariantsData = [];
         blockSelectedVars = [];
     }
+
+    /* -- HSD date picker sync -- */
+    $('#blockExpDatePicker').on('change', function () {
+        var iso = $(this).val(); // yyyy-mm-dd
+        if (iso) {
+            var parts = iso.split('-');
+            $('#blockExpDateDisplay').val(parts[2] + '/' + parts[1] + '/' + parts[0]);
+            $('#blockExpDate').val(iso);
+        }
+    });
+
+    $('#blockExpDateDisplay').on('input', function () {
+        var v = $(this).val().replace(/[^0-9/]/g, '');
+        $(this).val(v);
+        // Auto-add slashes
+        if (v.length === 2 && v.indexOf('/') === -1) $(this).val(v + '/');
+        if (v.length === 5 && v.lastIndexOf('/') === 2) $(this).val(v + '/');
+    }).on('change', function () {
+        var v = $.trim($(this).val());
+        var m = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (m) {
+            var iso = m[3] + '-' + m[2] + '-' + m[1];
+            $('#blockExpDate').val(iso);
+            $('#blockExpDatePicker').val(iso);
+        } else {
+            $('#blockExpDate').val('');
+            $('#blockExpDatePicker').val('');
+        }
+    });
 
     // Product search in Add Block modal
     $('#blockProductSearch').on('input', function () {
@@ -510,7 +563,9 @@
         ajax('tgs_idtf_add_product_block', {
             ledger_id: activeTab,
             product_id: productId,
-            variant_ids: JSON.stringify(blockSelectedVars)
+            variant_ids: JSON.stringify(blockSelectedVars),
+            exp_date: $.trim($('#blockExpDate').val()),
+            lot_code: $.trim($('#blockLotCode').val())
         }, function (d) {
             $btn.prop('disabled', false);
             bootstrap.Modal.getInstance(document.getElementById('modalAddBlock')).hide();
