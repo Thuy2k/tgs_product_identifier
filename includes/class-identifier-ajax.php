@@ -1389,20 +1389,32 @@ class TGS_Identifier_Ajax
         $blog_id    = intval($_POST['blog_id'] ?? get_current_blog_id());
 
         $table = TGS_TABLE_GLOBAL_PRODUCT_VARIANTS;
-        $where = "is_deleted = 0";
-        $params = [];
 
+        // Cross-site: query by local_product_sku (same SKU across all sites)
         if ($product_id > 0) {
-            $where .= " AND local_product_name_id = %d AND source_blog_id = %d";
-            $params[] = $product_id;
-            $params[] = $blog_id;
-        } else {
-            $where .= " AND source_blog_id = %d";
-            $params[] = $blog_id;
-        }
+            $sku = $wpdb->get_var($wpdb->prepare(
+                "SELECT local_product_sku FROM " . self::product_table() . " WHERE local_product_name_id = %d AND (is_deleted IS NULL OR is_deleted = 0)",
+                $product_id
+            ));
 
-        $sql = "SELECT * FROM {$table} WHERE {$where} ORDER BY variant_sort_order ASC, variant_id DESC";
-        $rows = $params ? $wpdb->get_results($wpdb->prepare($sql, ...$params), ARRAY_A) : $wpdb->get_results($sql, ARRAY_A);
+            if ($sku) {
+                $rows = $wpdb->get_results($wpdb->prepare(
+                    "SELECT * FROM {$table} WHERE local_product_sku = %s AND is_deleted = 0 ORDER BY variant_sort_order ASC, variant_id DESC",
+                    $sku
+                ), ARRAY_A);
+            } else {
+                // Fallback: product has no SKU, query by product_id + blog_id
+                $rows = $wpdb->get_results($wpdb->prepare(
+                    "SELECT * FROM {$table} WHERE local_product_name_id = %d AND source_blog_id = %d AND is_deleted = 0 ORDER BY variant_sort_order ASC, variant_id DESC",
+                    $product_id, $blog_id
+                ), ARRAY_A);
+            }
+        } else {
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT * FROM {$table} WHERE source_blog_id = %d AND is_deleted = 0 ORDER BY variant_sort_order ASC, variant_id DESC",
+                $blog_id
+            ), ARRAY_A);
+        }
 
         self::json_ok(['variants' => $rows ?: []]);
     }
@@ -1447,13 +1459,23 @@ class TGS_Identifier_Ajax
             $data['variant_meta'] = wp_json_encode(json_decode(stripslashes($_POST['variant_meta']), true));
         }
 
-        // Duplicate check
-        $dup_sql = $wpdb->prepare(
-            "SELECT variant_id FROM {$table}
-             WHERE local_product_name_id = %d AND source_blog_id = %d
-               AND variant_label = %s AND variant_value = %s AND is_deleted = 0",
-            $product_id, $blog_id, $data['variant_label'], $data['variant_value']
-        );
+        // Duplicate check: by SKU (cross-site) + label + value
+        $sku_for_dup = $product ? $product['local_product_sku'] : null;
+        if ($sku_for_dup) {
+            $dup_sql = $wpdb->prepare(
+                "SELECT variant_id FROM {$table}
+                 WHERE local_product_sku = %s
+                   AND variant_label = %s AND variant_value = %s AND is_deleted = 0",
+                $sku_for_dup, $data['variant_label'], $data['variant_value']
+            );
+        } else {
+            $dup_sql = $wpdb->prepare(
+                "SELECT variant_id FROM {$table}
+                 WHERE local_product_name_id = %d AND source_blog_id = %d
+                   AND variant_label = %s AND variant_value = %s AND is_deleted = 0",
+                $product_id, $blog_id, $data['variant_label'], $data['variant_value']
+            );
+        }
         if ($variant_id > 0) {
             $dup_sql .= $wpdb->prepare(" AND variant_id != %d", $variant_id);
         }
