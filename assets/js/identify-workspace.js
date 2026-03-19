@@ -543,7 +543,9 @@
                 beepError();
                 flashScanInput('danger');
             } else if (!d.can_assign) {
-                showScanAlert(d.status_label || 'Mã không thể gắn.', 'warning');
+                var alertMsg = d.status_label || 'Mã không thể gắn.';
+                if (d.warning_msg) alertMsg += ' ⚠ ' + d.warning_msg;
+                showScanAlert(alertMsg, 'warning');
                 beepWarning();
                 flashScanInput('warning');
             } else {
@@ -638,20 +640,35 @@
             viewCodesPage = d.page;
             var $tb = $('#viewCodesBody').empty();
             if (!d.lots || !d.lots.length) {
-                $tb.html('<tr><td colspan="4" class="text-center text-muted py-3">Chưa có mã nào.</td></tr>');
+                $tb.html('<tr><td colspan="5" class="text-center text-muted py-3">Chưa có mã nào.</td></tr>');
                 $('#viewCodesInfo').text('');
                 $('#viewCodesPager').empty();
                 return;
             }
 
             $.each(d.lots, function (i, r) {
+                var st = parseInt(r.local_product_lot_is_active);
+                var badge = '', canUnassign = false;
+                if (st === 1) {
+                    badge = '<span class="badge bg-label-success">Định danh</span>';
+                    canUnassign = true;
+                } else if (st === 0) {
+                    badge = '<span class="badge bg-label-danger">Đã bán/xuất</span>';
+                } else if (st === 100) {
+                    badge = '<span class="badge bg-label-secondary">Trống</span>';
+                } else {
+                    badge = '<span class="badge bg-label-warning">TT: ' + st + '</span>';
+                }
+                var actionBtn = canUnassign
+                    ? '<button class="btn btn-sm btn-outline-danger btn-unassign" data-lot-id="' + r.global_product_lot_id + '"><i class="bx bx-unlink"></i></button>'
+                    : '<span class="text-muted" title="Không thể gỡ — trạng thái đã thay đổi"><i class="bx bx-lock" style="font-size:16px;"></i></span>';
                 $tb.append(
-                    '<tr>'
+                    '<tr' + (canUnassign ? '' : ' class="table-warning"') + '>'
                     + '<td>' + ((page - 1) * 50 + i + 1) + '</td>'
                     + '<td><code>' + esc(r.global_product_lot_barcode) + '</code></td>'
+                    + '<td>' + badge + '</td>'
                     + '<td>' + (r.updated_at ? r.updated_at.substring(0, 16) : '—') + '</td>'
-                    + '<td><button class="btn btn-sm btn-outline-danger btn-unassign" data-lot-id="' + r.global_product_lot_id + '">'
-                    + '<i class="bx bx-unlink"></i></button></td>'
+                    + '<td>' + actionBtn + '</td>'
                     + '</tr>'
                 );
             });
@@ -708,8 +725,8 @@
                 return;
             }
             var st = parseInt(d.status);
-            var cls = st === 200 ? 'qs-blank' : (st === 1 ? 'qs-identified' : 'qs-notfound');
-            var label = st === 200 ? 'Mã trống' : (st === 1 ? 'Đã định danh: ' + esc(d.product_name || 'N/A') : 'Mã đã bán/xuất');
+            var cls = st === 100 ? 'qs-blank' : (st === 1 ? 'qs-identified' : 'qs-notfound');
+            var label = st === 100 ? 'Mã trống' : (st === 1 ? 'Đã định danh: ' + esc(d.product_name || 'N/A') : (d.status_label || 'Mã đã bán/xuất'));
             var vars = '';
             if (d.variants && d.variants.length) {
                 vars = ' — ';
@@ -717,7 +734,11 @@
                     vars += '<span class="idtf-variant-tag ms-1" style="font-size:10px;">' + esc(v.variant_label) + ': ' + esc(v.variant_value) + '</span>';
                 });
             }
-            $r.html('<div class="qs-found ' + cls + '"><i class="bx bx-barcode me-1"></i><code>' + esc(d.barcode) + '</code> — ' + label + vars + '</div>');
+            var warning = '';
+            if (d.warning) {
+                warning = '<div class="text-danger mt-1" style="font-size:11px;"><i class="bx bx-error me-1"></i>' + esc(d.warning_msg) + '</div>';
+            }
+            $r.html('<div class="qs-found ' + cls + '"><i class="bx bx-barcode me-1"></i><code>' + esc(d.barcode) + '</code> — ' + label + vars + warning + '</div>');
         });
     }
 
@@ -734,6 +755,11 @@
         custom: []
     };
 
+    var varLabelMap = {
+        size: 'Kích cỡ', color: 'Màu sắc', expiry: 'Hạn sử dụng',
+        flavor: 'Hương vị', weight: 'Trọng lượng', age_range: 'Độ tuổi', custom: ''
+    };
+
     $('#qvType').on('change', function () {
         var type = $(this).val();
         var chips = varPresets[type] || [];
@@ -743,15 +769,15 @@
         $.each(chips, function (_, c) {
             $area.append('<span class="idtf-preset-chip">' + c + '</span>');
         });
+        // Auto-fill label
+        $('#qvLabel').val(varLabelMap[type] || '');
     }).trigger('change');
 
     $(document).on('click', '#qvPresetChips .idtf-preset-chip', function () {
         var val = $(this).text();
         $('#qvValue').val(val);
-        if (!$('#qvLabel').val()) {
-            var typeText = $('#qvType option:selected').text();
-            $('#qvLabel').val(typeText);
-        }
+        // Auto-fill SKU suffix from value
+        $('#qvSkuSuffix').val('-' + val.replace(/\s+/g, '').substring(0, 10));
     });
 
     // Save quick variant
@@ -764,12 +790,13 @@
             product_id: productId,
             variant_type: $('#qvType').val(),
             variant_label: $.trim($('#qvLabel').val()),
-            variant_value: $.trim($('#qvValue').val())
+            variant_value: $.trim($('#qvValue').val()),
+            variant_sku_suffix: $.trim($('#qvSkuSuffix').val())
         }, function (d) {
             $btn.prop('disabled', false);
             bootstrap.Modal.getInstance(document.getElementById('modalQuickVariant')).hide();
             toast('Đã thêm biến thể.');
-            $('#qvLabel, #qvValue').val('');
+            $('#qvLabel, #qvValue, #qvSkuSuffix').val('');
             loadBlockVariants(productId);
         }, function () { $btn.prop('disabled', false); });
     });

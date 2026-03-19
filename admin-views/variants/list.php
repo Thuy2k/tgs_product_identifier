@@ -52,12 +52,13 @@ if (!defined('ABSPATH')) exit;
                                     <th>Loại</th>
                                     <th>Nhãn</th>
                                     <th>Giá trị</th>
+                                    <th>SKU sản phẩm</th>
                                     <th>SKU suffix</th>
                                     <th></th>
                                 </tr>
                             </thead>
                             <tbody id="variantTableBody">
-                                <tr><td colspan="5" class="text-center text-muted py-3">Chưa có biến thể</td></tr>
+                                <tr><td colspan="6" class="text-center text-muted py-3">Chưa có biến thể</td></tr>
                             </tbody>
                         </table>
                     </div>

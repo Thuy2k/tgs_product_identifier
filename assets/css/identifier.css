@@ -259,6 +259,12 @@
     .idtf-mobile-sidebar-toggle { display: none !important; }
 }
 
+/* ── Elevated modal (quick variant / quick product) ── */
+.idtf-modal-elevated {
+    box-shadow: 0 16px 48px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.05);
+    border: none;
+}
+
 /* ── Quick search result ───────────────────────────────────────── */
 #quickSearchResult .qs-found {
     display: inline-flex; align-items: center; gap: 8px;

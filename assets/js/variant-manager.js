@@ -110,7 +110,7 @@
     function renderVariants(rows) {
         var $tb = $('#variantTableBody').empty();
         if (!rows.length) {
-            $tb.html('<tr><td colspan="5" class="text-center text-muted py-3">Chưa có biến thể</td></tr>');
+            $tb.html('<tr><td colspan="6" class="text-center text-muted py-3">Chưa có biến thể</td></tr>');
             return;
         }
 
@@ -120,6 +120,7 @@
                 + '<td>' + esc(v.variant_type || 'custom') + '</td>'
                 + '<td>' + esc(v.variant_label) + '</td>'
                 + '<td><strong>' + esc(v.variant_value) + '</strong></td>'
+                + '<td><code style="font-size:11px;">' + esc(v.local_product_sku || '—') + '</code></td>'
                 + '<td>' + esc(v.variant_sku_suffix || '—') + '</td>'
                 + '<td>'
                 + '<button class="btn btn-sm btn-outline-primary me-1 btn-edit-var" data-v=\'' + JSON.stringify(v).replace(/'/g, '&#39;') + '\'><i class="bx bx-edit-alt"></i></button>'

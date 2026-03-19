@@ -220,8 +220,8 @@ class TGS_Identifier_Ajax
             $wpdb->insert($lots_table, [
                 'global_product_lot_barcode'   => $barcode,
                 'local_product_name_id'        => null,
-                'global_product_lot_is_active' => 200,
-                'local_product_lot_is_active'  => 200,
+                'global_product_lot_is_active' => 100,
+                'local_product_lot_is_active'  => 100,
                 'source_blog_id'               => $blog_id,
                 'to_blog_id'                   => $blog_id,
                 'variant_id'                   => null,
@@ -364,7 +364,7 @@ class TGS_Identifier_Ajax
             $s = intval($sr['s']);
             $c = intval($sr['c']);
             $stats['total'] += $c;
-            if ($s === 200) $stats['blank'] = $c;
+            if ($s === 100) $stats['blank'] = $c;
             elseif ($s === 1) $stats['identified'] = $c;
             elseif ($s === 0) $stats['sold'] = $c;
         }
@@ -434,7 +434,10 @@ class TGS_Identifier_Ajax
                     l.variant_combo_hash, l.identifier_ledger_id, l.created_at,
                     p.local_product_name
              FROM {$lots_tbl} l
-             LEFT JOIN {$prod_tbl} p ON l.local_product_name_id = p.local_product_name_id
+             LEFT JOIN {$prod_tbl} p
+                ON l.local_product_sku IS NOT NULL
+               AND p.local_product_sku = l.local_product_sku
+               AND (p.is_deleted IS NULL OR p.is_deleted = 0)
              WHERE {$where}
              ORDER BY l.global_product_lot_id ASC
              LIMIT %d OFFSET %d",
@@ -698,12 +701,17 @@ class TGS_Identifier_Ajax
 
         if (!$ledger) self::json_err('Không tìm thấy phiếu.');
 
-        // Get blocks
+        // Get blocks — JOIN bằng SKU để cross-site vẫn nhận đúng sản phẩm
         $blocks = $wpdb->get_results($wpdb->prepare(
-            "SELECT b.*, p.local_product_name, p.local_product_sku, p.local_product_barcode_main,
+            "SELECT b.*, p.local_product_name,
+                    COALESCE(p.local_product_sku, b.local_product_sku) AS local_product_sku,
+                    COALESCE(p.local_product_barcode_main, b.local_product_barcode_main) AS local_product_barcode_main,
                     p.local_product_thumbnail, p.local_product_price_after_tax
              FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . " b
-             LEFT JOIN " . self::product_table() . " p ON b.local_product_name_id = p.local_product_name_id
+             LEFT JOIN " . self::product_table() . " p
+                ON b.local_product_sku IS NOT NULL
+               AND p.local_product_sku = b.local_product_sku
+               AND (p.is_deleted IS NULL OR p.is_deleted = 0)
              WHERE b.ledger_id = %d AND b.is_deleted = 0
              ORDER BY b.block_sort_order ASC, b.block_id ASC",
             $ledger_id
@@ -753,19 +761,27 @@ class TGS_Identifier_Ajax
         $now = current_time('mysql');
         $combo_hash = self::combo_hash($variant_ids);
 
+        // Lookup SKU + barcode from product table for cross-site identification
+        $product = $wpdb->get_row($wpdb->prepare(
+            "SELECT local_product_sku, local_product_barcode_main FROM " . self::product_table() . " WHERE local_product_name_id = %d LIMIT 1",
+            $product_id
+        ), ARRAY_A);
+
         $wpdb->insert(TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS, [
-            'ledger_id'              => $ledger_id,
-            'ledger_blog_id'         => $blog_id,
-            'local_product_name_id'  => $product_id,
-            'source_blog_id'         => $blog_id,
-            'variant_ids'            => wp_json_encode(array_map('intval', $variant_ids)),
-            'variant_combo_hash'     => $combo_hash,
-            'codes_count'            => 0,
-            'block_sort_order'       => 0,
-            'user_id'                => get_current_user_id(),
-            'is_deleted'             => 0,
-            'created_at'             => $now,
-            'updated_at'             => $now,
+            'ledger_id'                  => $ledger_id,
+            'ledger_blog_id'             => $blog_id,
+            'local_product_name_id'      => $product_id,
+            'source_blog_id'             => $blog_id,
+            'local_product_sku'          => $product['local_product_sku'] ?? null,
+            'local_product_barcode_main' => $product['local_product_barcode_main'] ?? null,
+            'variant_ids'                => wp_json_encode(array_map('intval', $variant_ids)),
+            'variant_combo_hash'         => $combo_hash,
+            'codes_count'                => 0,
+            'block_sort_order'           => 0,
+            'user_id'                    => get_current_user_id(),
+            'is_deleted'                 => 0,
+            'created_at'                 => $now,
+            'updated_at'                 => $now,
         ]);
 
         $block_id = $wpdb->insert_id;
@@ -804,6 +820,26 @@ class TGS_Identifier_Ajax
             ? $wpdb->prepare(" AND variant_combo_hash = %s", $combo_hash)
             : " AND variant_combo_hash IS NULL";
 
+        // Kiểm tra trước: có lot nào đã thay đổi trạng thái (≠ 1) không?
+        $changed_lots = $wpdb->get_results($wpdb->prepare(
+            "SELECT global_product_lot_id, global_product_lot_barcode, local_product_lot_is_active
+             FROM " . self::lots_table() . "
+             WHERE local_product_name_id = %d
+               AND identifier_ledger_id = %d
+               AND local_product_lot_is_active != 1
+               AND is_deleted = 0" . $where_combo,
+            $product_id, $ledger_id
+        ), ARRAY_A);
+
+        if (!empty($changed_lots)) {
+            $barcodes = array_column($changed_lots, 'global_product_lot_barcode');
+            $preview  = array_slice($barcodes, 0, 5);
+            $msg = 'Không thể xóa khối. ' . count($barcodes) . ' mã đã thay đổi trạng thái (có thể đã bán/hoàn/hủy): '
+                 . implode(', ', $preview);
+            if (count($barcodes) > 5) $msg .= '… và ' . (count($barcodes) - 5) . ' mã khác';
+            self::json_err($msg);
+        }
+
         $lots = $wpdb->get_col($wpdb->prepare(
             "SELECT global_product_lot_id FROM " . self::lots_table() . "
              WHERE local_product_name_id = %d
@@ -818,8 +854,9 @@ class TGS_Identifier_Ajax
             // Reset lots
             $wpdb->query($wpdb->prepare(
                 "UPDATE " . self::lots_table() . "
-                 SET local_product_lot_is_active = 200,
+                 SET local_product_lot_is_active = 100,
                      local_product_name_id = NULL,
+                     local_product_sku = NULL,
                      variant_id = NULL,
                      variant_combo_hash = NULL,
                      identifier_ledger_id = NULL,
@@ -886,7 +923,10 @@ class TGS_Identifier_Ajax
         $lot = $wpdb->get_row($wpdb->prepare(
             "SELECT l.*, p.local_product_name
              FROM " . self::lots_table() . " l
-             LEFT JOIN " . self::product_table() . " p ON l.local_product_name_id = p.local_product_name_id
+             LEFT JOIN " . self::product_table() . " p
+                ON l.local_product_sku IS NOT NULL
+               AND p.local_product_sku = l.local_product_sku
+               AND (p.is_deleted IS NULL OR p.is_deleted = 0)
              WHERE l.global_product_lot_barcode = %s AND l.is_deleted = 0",
             $barcode
         ), ARRAY_A);
@@ -905,10 +945,10 @@ class TGS_Identifier_Ajax
             'lot_id'     => $lot['global_product_lot_id'],
             'barcode'    => $lot['global_product_lot_barcode'],
             'status'     => $status,
-            'can_assign' => $status === 200,
+            'can_assign' => $status === 100,
         ];
 
-        if ($status === 200) {
+        if ($status === 100) {
             $result['status_label'] = 'Mã trống — sẵn sàng định danh';
         } elseif ($status === 1) {
             $result['status_label'] = 'Đã định danh: ' . ($lot['local_product_name'] ?? 'N/A');
@@ -916,8 +956,12 @@ class TGS_Identifier_Ajax
             $result['identifier_ledger_id'] = $lot['identifier_ledger_id'];
         } elseif ($status === 0) {
             $result['status_label'] = 'Đã bán / đã xuất';
+            $result['warning'] = true;
+            $result['warning_msg'] = 'Mã ' . $barcode . ' đã bán/xuất — không thể gán hoặc gỡ.';
         } else {
             $result['status_label'] = 'Trạng thái: ' . $status;
+            $result['warning'] = true;
+            $result['warning_msg'] = 'Mã ' . $barcode . ' có trạng thái bất thường (' . $status . ').';
         }
 
         self::json_ok($result);
@@ -945,6 +989,7 @@ class TGS_Identifier_Ajax
         if (!$block) self::json_err('Không tìm thấy khối.');
 
         $product_id  = $block['local_product_name_id'];
+        $product_sku = $block['local_product_sku'];
         $ledger_id   = $block['ledger_id'];
         $variant_ids = json_decode($block['variant_ids'] ?? '[]', true) ?: [];
         $combo_hash  = $block['variant_combo_hash'];
@@ -956,9 +1001,10 @@ class TGS_Identifier_Ajax
         foreach ($lot_ids as $lot_id) {
             $lot_id = intval($lot_id);
 
-            // Chỉ gắn mã trống (status=200)
+            // Chỉ gắn mã trống (status=100)
             $result = $wpdb->update(self::lots_table(), [
                 'local_product_name_id'        => $product_id,
+                'local_product_sku'            => $product_sku,
                 'local_product_lot_is_active'  => 1,
                 'global_product_lot_is_active' => 1,
                 'variant_combo_hash'           => $combo_hash,
@@ -967,7 +1013,7 @@ class TGS_Identifier_Ajax
                 'updated_at'                   => $now,
             ], [
                 'global_product_lot_id'        => $lot_id,
-                'local_product_lot_is_active'  => 200,
+                'local_product_lot_is_active'  => 100,
                 'is_deleted'                   => 0,
             ]);
 
@@ -1020,7 +1066,7 @@ class TGS_Identifier_Ajax
     }
 
     /**
-     * Gỡ 1 mã khỏi khối
+     * Gỡ 1 mã khỏi khối — chỉ cho gỡ nếu trạng thái vẫn = 1 (đã định danh)
      */
     public static function tgs_idtf_unassign_code()
     {
@@ -1032,13 +1078,29 @@ class TGS_Identifier_Ajax
 
         if ($lot_id <= 0) self::json_err('lot_id không hợp lệ.');
 
+        // Kiểm tra lot hiện tại
+        $lot = $wpdb->get_row($wpdb->prepare(
+            "SELECT global_product_lot_id, global_product_lot_barcode, local_product_lot_is_active
+             FROM " . self::lots_table() . " WHERE global_product_lot_id = %d AND is_deleted = 0",
+            $lot_id
+        ), ARRAY_A);
+
+        if (!$lot) self::json_err('Mã không tồn tại.');
+
+        $status = intval($lot['local_product_lot_is_active']);
+        if ($status !== 1) {
+            $label = $status === 0 ? 'đã bán/xuất' : ($status === 100 ? 'mã trống' : 'trạng thái ' . $status);
+            self::json_err('Không thể gỡ mã ' . $lot['global_product_lot_barcode'] . ' — ' . $label . '. Mã này đã thay đổi trạng thái sau khi định danh.');
+        }
+
         $now = current_time('mysql');
 
         // Reset lot
         $wpdb->update(self::lots_table(), [
-            'local_product_lot_is_active'  => 200,
-            'global_product_lot_is_active' => 200,
+            'local_product_lot_is_active'  => 100,
+            'global_product_lot_is_active' => 100,
             'local_product_name_id'        => null,
+            'local_product_sku'            => null,
             'variant_combo_hash'           => null,
             'identifier_ledger_id'         => null,
             'updated_at'                   => $now,
@@ -1108,17 +1170,18 @@ class TGS_Identifier_Ajax
         $total = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM " . self::lots_table() . " l
              WHERE l.local_product_name_id = %d AND l.identifier_ledger_id = %d
-               AND l.local_product_lot_is_active = 1 AND l.is_deleted = 0" . $where_combo,
+               AND l.is_deleted = 0" . $where_combo,
             ...$base_params
         ));
 
         $offset = ($page - 1) * $per_page;
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT l.global_product_lot_id, l.global_product_lot_barcode, l.created_at, l.updated_at
+            "SELECT l.global_product_lot_id, l.global_product_lot_barcode,
+                    l.local_product_lot_is_active, l.created_at, l.updated_at
              FROM " . self::lots_table() . " l
              WHERE l.local_product_name_id = %d AND l.identifier_ledger_id = %d
-               AND l.local_product_lot_is_active = 1 AND l.is_deleted = 0" . $where_combo . "
-             ORDER BY l.updated_at DESC LIMIT %d OFFSET %d",
+               AND l.is_deleted = 0" . $where_combo . "
+             ORDER BY l.local_product_lot_is_active DESC, l.updated_at DESC LIMIT %d OFFSET %d",
             ...array_merge($base_params, [$per_page, $offset])
         ), ARRAY_A);
 
@@ -1148,7 +1211,10 @@ class TGS_Identifier_Ajax
         $lot = $wpdb->get_row($wpdb->prepare(
             "SELECT l.*, p.local_product_name
              FROM " . self::lots_table() . " l
-             LEFT JOIN " . self::product_table() . " p ON l.local_product_name_id = p.local_product_name_id
+             LEFT JOIN " . self::product_table() . " p
+                ON l.local_product_sku IS NOT NULL
+               AND p.local_product_sku = l.local_product_sku
+               AND (p.is_deleted IS NULL OR p.is_deleted = 0)
              WHERE l.global_product_lot_barcode = %s AND l.is_deleted = 0",
             $barcode
         ), ARRAY_A);
@@ -1167,6 +1233,20 @@ class TGS_Identifier_Ajax
             'product_name'         => $lot['local_product_name'],
             'identifier_ledger_id' => $lot['identifier_ledger_id'],
         ];
+
+        if ($status === 100) {
+            $result['status_label'] = 'Mã trống';
+        } elseif ($status === 1) {
+            $result['status_label'] = 'Đã định danh: ' . ($lot['local_product_name'] ?? 'N/A');
+        } elseif ($status === 0) {
+            $result['status_label'] = 'Đã bán / đã xuất';
+            $result['warning'] = true;
+            $result['warning_msg'] = 'Mã này đã bán/xuất — không thể gỡ hoặc xóa khối chứa nó.';
+        } else {
+            $result['status_label'] = 'Trạng thái: ' . $status;
+            $result['warning'] = true;
+            $result['warning_msg'] = 'Mã này có trạng thái bất thường (' . $status . ').';
+        }
 
         // Lấy biến thể
         $variants = $wpdb->get_results($wpdb->prepare(
@@ -1227,10 +1307,18 @@ class TGS_Identifier_Ajax
 
         if ($product_id <= 0) self::json_err('Chưa chọn sản phẩm.');
 
+        // Lookup product SKU & barcode
+        $product = $wpdb->get_row($wpdb->prepare(
+            "SELECT local_product_sku, local_product_barcode_main FROM " . self::product_table() . " WHERE local_product_name_id = %d AND (is_deleted IS NULL OR is_deleted = 0)",
+            $product_id
+        ), ARRAY_A);
+
         $data = [
-            'local_product_name_id'    => $product_id,
-            'source_blog_id'           => $blog_id,
-            'variant_type'             => sanitize_text_field($_POST['variant_type'] ?? 'custom'),
+            'local_product_name_id'      => $product_id,
+            'source_blog_id'             => $blog_id,
+            'local_product_sku'          => $product ? $product['local_product_sku'] : null,
+            'local_product_barcode_main' => $product ? $product['local_product_barcode_main'] : null,
+            'variant_type'               => sanitize_text_field($_POST['variant_type'] ?? 'custom'),
             'variant_label'            => sanitize_text_field($_POST['variant_label'] ?? ''),
             'variant_value'            => sanitize_text_field($_POST['variant_value'] ?? ''),
             'variant_sku_suffix'       => sanitize_text_field($_POST['variant_sku_suffix'] ?? ''),

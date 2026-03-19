@@ -253,12 +253,13 @@ if (!defined('ABSPATH')) exit;
                             <tr>
                                 <th>#</th>
                                 <th>Mã barcode</th>
+                                <th>Trạng thái</th>
                                 <th>Ngày gắn</th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody id="viewCodesBody">
-                            <tr><td colspan="4" class="text-center text-muted py-3">Đang tải...</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted py-3">Đang tải...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -274,7 +275,7 @@ if (!defined('ABSPATH')) exit;
 <!-- MODAL: Thêm nhanh biến thể -->
 <div class="modal fade" id="modalQuickVariant" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
+        <div class="modal-content idtf-modal-elevated">
             <div class="modal-header">
                 <h5 class="modal-title">Thêm nhanh biến thể</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -304,6 +305,11 @@ if (!defined('ABSPATH')) exit;
                     <label class="form-label fw-semibold">Giá trị</label>
                     <input type="text" id="qvValue" class="form-control" placeholder="VD: M, L, XL..." />
                 </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">SKU suffix</label>
+                    <input type="text" id="qvSkuSuffix" class="form-control" placeholder="VD: -M, -XL..." />
+                    <small class="text-muted">Hậu tố ghép vào SKU sản phẩm gốc</small>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
@@ -316,7 +322,7 @@ if (!defined('ABSPATH')) exit;
 <!-- MODAL: Thêm nhanh SP -->
 <div class="modal fade" id="modalQuickProduct" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
+        <div class="modal-content idtf-modal-elevated">
             <div class="modal-header">
                 <h5 class="modal-title">Thêm nhanh sản phẩm</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>

@@ -160,7 +160,7 @@
     }
 
     function statusBadge(st, productName) {
-        if (st === 200) return '<span class="badge bg-label-warning">Trống</span>';
+        if (st === 100) return '<span class="badge bg-label-warning">Trống</span>';
         if (st === 1) return '<span class="badge bg-label-success">Đã định danh</span>';
         if (st === 0) return '<span class="badge bg-label-info">Đã bán</span>';
         return '<span class="badge bg-label-secondary">' + st + '</span>';
