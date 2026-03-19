@@ -507,6 +507,41 @@ class TGS_Identifier_Ajax
             ...array_merge($params, [$per_page, $offset])
         ), ARRAY_A);
 
+        // Enrich: batch-load variant labels for identified lots
+        $lot_ids_for_vars = [];
+        if ($rows) {
+            foreach ($rows as $r) {
+                if (!empty($r['global_product_lot_id']) && intval($r['local_product_lot_is_active']) === 1) {
+                    $lot_ids_for_vars[] = intval($r['global_product_lot_id']);
+                }
+            }
+        }
+        $variant_map = []; // lot_id => [ {label, value}, ... ]
+        if (!empty($lot_ids_for_vars)) {
+            $ph = implode(',', array_fill(0, count($lot_ids_for_vars), '%d'));
+            $var_rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT m.global_product_lot_id, v.variant_label, v.variant_value
+                 FROM " . TGS_TABLE_GLOBAL_LOT_VARIANT_MAP . " m
+                 JOIN " . TGS_TABLE_GLOBAL_PRODUCT_VARIANTS . " v ON v.variant_id = m.variant_id AND v.is_deleted = 0
+                 WHERE m.global_product_lot_id IN ({$ph})
+                 ORDER BY v.variant_sort_order ASC, v.variant_id ASC",
+                ...$lot_ids_for_vars
+            ), ARRAY_A);
+            foreach ($var_rows as $vr) {
+                $lid = intval($vr['global_product_lot_id']);
+                if (!isset($variant_map[$lid])) $variant_map[$lid] = [];
+                $variant_map[$lid][] = ['label' => $vr['variant_label'], 'value' => $vr['variant_value']];
+            }
+        }
+        // Attach variants to rows
+        if ($rows) {
+            foreach ($rows as &$r) {
+                $lid = intval($r['global_product_lot_id']);
+                $r['variants'] = $variant_map[$lid] ?? [];
+            }
+            unset($r);
+        }
+
         self::json_ok([
             'lots'  => $rows ?: [],
             'total' => intval($total),

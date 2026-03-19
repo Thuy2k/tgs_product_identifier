@@ -136,7 +136,7 @@
     function renderLots(rows) {
         var $tb = $('#lotsTableBody').empty();
         if (!rows || !rows.length) {
-            $tb.html('<tr><td colspan="6" class="text-center py-4 text-muted">Không có dữ liệu.</td></tr>');
+            $tb.html('<tr><td colspan="7" class="text-center py-4 text-muted">Không có dữ liệu.</td></tr>');
             return;
         }
 
@@ -146,6 +146,14 @@
             var isChecked = selected[r.global_product_lot_id] ? ' checked' : '';
             var dateStr = r.created_at ? r.created_at.substring(0, 16) : '—';
 
+            var varTags = '—';
+            if (r.variants && r.variants.length) {
+                varTags = '';
+                $.each(r.variants, function (_, v) {
+                    varTags += '<span class="badge bg-label-primary me-1" style="font-size:10px;">' + esc(v.label) + ': ' + esc(v.value) + '</span>';
+                });
+            }
+
             $tb.append(
                 '<tr class="lot-row' + (isChecked ? ' selected' : '') + '">'
                 + '<td><input type="checkbox" class="form-check-input lot-check" data-lotid="' + r.global_product_lot_id + '" data-barcode="' + esc(r.global_product_lot_barcode) + '"' + isChecked + ' /></td>'
@@ -153,6 +161,7 @@
                 + '<td><code>' + esc(r.global_product_lot_barcode) + '</code></td>'
                 + '<td>' + badge + '</td>'
                 + '<td>' + esc(r.local_product_name || '—') + '</td>'
+                + '<td>' + varTags + '</td>'
                 + '<td>' + dateStr + '</td>'
                 + '</tr>'
             );
