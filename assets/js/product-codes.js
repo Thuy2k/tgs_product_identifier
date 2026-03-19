@@ -106,11 +106,18 @@
                 html += '</div>';
             }
 
-            // Row 5: Assignment info
+            // Row 5: Assignment info (phiếu + khối)
             if (d.assignment) {
+                var a = d.assignment;
                 html += '<div class="pc-qr-row" style="font-size:12px; color:#8592a3;">'
-                    + '<i class="bx bx-file me-1"></i>Phiếu: #' + esc(d.assignment.ledger_id);
-                if (d.assignment.block_label) html += ' · Khối: ' + esc(d.assignment.block_label);
+                    + '<i class="bx bx-file me-1"></i>Phiếu: ';
+                if (a.ledger_code) html += '<b>' + esc(a.ledger_code) + '</b>';
+                else html += '#' + esc(a.ledger_id);
+                if (a.ledger_title) html += ' — ' + esc(a.ledger_title);
+                if (a.block_position) {
+                    html += ' · <i class="bx bx-package me-1"></i>Khối ' + a.block_position + '/' + a.total_blocks;
+                    if (a.block_label) html += ' (' + esc(a.block_label) + ')';
+                }
                 html += '</div>';
             }
 

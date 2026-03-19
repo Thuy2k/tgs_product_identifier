@@ -515,10 +515,7 @@
         ajax('tgs_idtf_get_variants', { product_id: productId }, function (d) {
             blockVariantsData = d.variants || [];
             blockSelectedVars = [];
-            if (!blockVariantsData.length) {
-                $('#blockVariantSection').hide();
-                return;
-            }
+            // Luôn hiện section — để nhân viên có thể thêm biến thể mới
             $('#blockVariantSection').show();
             renderBlockVariantChips();
         });
@@ -526,6 +523,10 @@
 
     function renderBlockVariantChips() {
         var $list = $('#blockVariantList').empty();
+        if (!blockVariantsData.length) {
+            $list.html('<span class="text-muted" style="font-size:12px;">Chưa có biến thể. Bấm nút bên dưới để thêm.</span>');
+            return;
+        }
         $.each(blockVariantsData, function (_, v) {
             var sel = blockSelectedVars.indexOf(parseInt(v.variant_id)) >= 0 ? ' selected' : '';
             $list.append(
@@ -887,6 +888,7 @@
                     + ' <span style="color:#8592a3;">(' + esc(a.ledger_code) + ')</span>';
                 if (a.block_position) {
                     assignInfo += ' — <i class="bx bx-cube me-1"></i>Khối thứ ' + a.block_position + '/' + a.total_blocks;
+                    if (a.block_label) assignInfo += ' (' + esc(a.block_label) + ')';
                 }
                 assignInfo += '</div>';
             }

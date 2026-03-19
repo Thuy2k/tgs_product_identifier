@@ -118,45 +118,48 @@ class TGS_Identifier_Ajax
 
         if (!$ledger) return null;
 
-        // Tìm khối chứa lot (match product_id + combo_hash + ledger_id)
-        $combo_hash = $lot['variant_combo_hash'] ?? null;
-        $product_id = intval($lot['local_product_name_id'] ?? 0);
-        $where_combo = $combo_hash !== null
-            ? $wpdb->prepare(" AND variant_combo_hash = %s", $combo_hash)
-            : " AND variant_combo_hash IS NULL";
-
-        $blocks_in_ledger = $wpdb->get_results($wpdb->prepare(
-            "SELECT block_id, block_sort_order, local_product_name_id
-             FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . "
-             WHERE ledger_id = %d AND is_deleted = 0
-             ORDER BY block_sort_order ASC, block_id ASC",
-            $ledger_id
-        ), ARRAY_A);
-
+        // Lấy khối chứa lot — dùng block_id trực tiếp (chính xác 100%)
+        $lot_block_id = intval($lot['block_id'] ?? 0);
         $block_position = null;
         $block_id = null;
-        foreach ($blocks_in_ledger as $idx => $b) {
-            if (intval($b['local_product_name_id']) === $product_id) {
-                // Check combo_hash match nếu cần
-                $b_hash = $wpdb->get_var($wpdb->prepare(
-                    "SELECT variant_combo_hash FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . " WHERE block_id = %d",
-                    $b['block_id']
-                ));
-                if (($combo_hash === null && $b_hash === null) || $combo_hash === $b_hash) {
-                    $block_position = $idx + 1; // 1-indexed
-                    $block_id = intval($b['block_id']);
+        $total_blocks = 0;
+        $block_label = null;
+
+        if ($lot_block_id > 0) {
+            // Lấy tất cả block trong phiếu để tính vị trí + tên
+            $blocks_in_ledger = $wpdb->get_results($wpdb->prepare(
+                "SELECT b.block_id, b.local_product_name_id,
+                        COALESCE(p.local_product_name, CONCAT('SP #', b.local_product_name_id)) AS product_name
+                 FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . " b
+                 LEFT JOIN " . self::product_table() . " p
+                    ON b.local_product_sku IS NOT NULL
+                   AND p.local_product_sku = b.local_product_sku
+                   AND (p.is_deleted IS NULL OR p.is_deleted = 0)
+                 WHERE b.ledger_id = %d AND b.is_deleted = 0
+                 ORDER BY b.block_sort_order ASC, b.block_id ASC",
+                $ledger_id
+            ), ARRAY_A);
+
+            $total_blocks = count($blocks_in_ledger);
+
+            foreach ($blocks_in_ledger as $idx => $b) {
+                if (intval($b['block_id']) === $lot_block_id) {
+                    $block_position = $idx + 1;
+                    $block_id = $lot_block_id;
+                    $block_label = $b['product_name'];
                     break;
                 }
             }
         }
 
         return [
-            'ledger_id'    => $ledger['local_ledger_id'],
-            'ledger_code'  => $ledger['local_ledger_code'],
-            'ledger_title' => $ledger['local_ledger_title'],
-            'block_id'     => $block_id,
+            'ledger_id'      => $ledger['local_ledger_id'],
+            'ledger_code'    => $ledger['local_ledger_code'],
+            'ledger_title'   => $ledger['local_ledger_title'],
+            'block_id'       => $block_id,
+            'block_label'    => $block_label,
             'block_position' => $block_position,
-            'total_blocks' => count($blocks_in_ledger),
+            'total_blocks'   => $total_blocks,
         ];
     }
 
@@ -917,25 +920,16 @@ class TGS_Identifier_Ajax
 
         $now = current_time('mysql');
 
-        // Gỡ tất cả mã đã gắn trong khối
-        $combo_hash = $block['variant_combo_hash'];
-        $ledger_id  = $block['ledger_id'];
-        $product_id = $block['local_product_name_id'];
-
-        // Tìm các lot đã gắn vào khối này (cùng product + combo + identifier_ledger_id)
-        $where_combo = $combo_hash !== null
-            ? $wpdb->prepare(" AND variant_combo_hash = %s", $combo_hash)
-            : " AND variant_combo_hash IS NULL";
+        // Gỡ tất cả mã đã gắn trong khối — dùng block_id chính xác
 
         // Kiểm tra trước: có lot nào đã thay đổi trạng thái (≠ 1) không?
         $changed_lots = $wpdb->get_results($wpdb->prepare(
             "SELECT global_product_lot_id, global_product_lot_barcode, local_product_lot_is_active
              FROM " . self::lots_table() . "
-             WHERE local_product_name_id = %d
-               AND identifier_ledger_id = %d
+             WHERE block_id = %d
                AND local_product_lot_is_active != 1
-               AND is_deleted = 0" . $where_combo,
-            $product_id, $ledger_id
+               AND is_deleted = 0",
+            $block_id
         ), ARRAY_A);
 
         if (!empty($changed_lots)) {
@@ -949,10 +943,8 @@ class TGS_Identifier_Ajax
 
         $lots = $wpdb->get_col($wpdb->prepare(
             "SELECT global_product_lot_id FROM " . self::lots_table() . "
-             WHERE local_product_name_id = %d
-               AND identifier_ledger_id = %d
-               AND is_deleted = 0" . $where_combo,
-            $product_id, $ledger_id
+             WHERE block_id = %d AND is_deleted = 0",
+            $block_id
         ));
 
         if (!empty($lots)) {
@@ -967,6 +959,7 @@ class TGS_Identifier_Ajax
                      variant_id = NULL,
                      variant_combo_hash = NULL,
                      identifier_ledger_id = NULL,
+                     block_id = NULL,
                      exp_date = NULL,
                      lot_code = NULL,
                      updated_at = %s
@@ -1124,6 +1117,7 @@ class TGS_Identifier_Ajax
                 'global_product_lot_is_active' => 1,
                 'variant_combo_hash'           => $combo_hash,
                 'identifier_ledger_id'         => $ledger_id,
+                'block_id'                     => $block_id,
                 'to_blog_id'                   => $block['source_blog_id'],
                 'exp_date'                     => $block_exp,
                 'lot_code'                     => $block_lot,
@@ -1160,15 +1154,13 @@ class TGS_Identifier_Ajax
             $wpdb->query($wpdb->prepare($sql, ...$values));
         }
 
-        // Update codes_count cache
+        // Update codes_count cache — dùng block_id chính xác
         $total_codes = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM " . self::lots_table() . "
-             WHERE local_product_name_id = %d
-               AND identifier_ledger_id = %d
+             WHERE block_id = %d
                AND local_product_lot_is_active = 1
-               AND is_deleted = 0"
-             . ($combo_hash ? " AND variant_combo_hash = %s" : " AND variant_combo_hash IS NULL"),
-            ...array_merge([$product_id, $ledger_id], $combo_hash ? [$combo_hash] : [])
+               AND is_deleted = 0",
+            $block_id
         ));
 
         $wpdb->update(TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS, [
@@ -1220,6 +1212,7 @@ class TGS_Identifier_Ajax
             'local_product_sku'            => null,
             'variant_combo_hash'           => null,
             'identifier_ledger_id'         => null,
+            'block_id'                     => null,
             'exp_date'                     => null,
             'lot_code'                     => null,
             'updated_at'                   => $now,
@@ -1231,30 +1224,20 @@ class TGS_Identifier_Ajax
         // Delete variant map
         $wpdb->delete(TGS_TABLE_GLOBAL_LOT_VARIANT_MAP, ['global_product_lot_id' => $lot_id]);
 
-        // Update block codes_count if block_id provided
+        // Update block codes_count if block_id provided — dùng block_id chính xác
         if ($block_id > 0) {
-            $block = $wpdb->get_row($wpdb->prepare(
-                "SELECT * FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . " WHERE block_id = %d",
+            $cnt = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM " . self::lots_table() . "
+                 WHERE block_id = %d
+                   AND local_product_lot_is_active = 1
+                   AND is_deleted = 0",
                 $block_id
-            ), ARRAY_A);
+            ));
 
-            if ($block) {
-                $combo_hash = $block['variant_combo_hash'];
-                $cnt = $wpdb->get_var($wpdb->prepare(
-                    "SELECT COUNT(*) FROM " . self::lots_table() . "
-                     WHERE local_product_name_id = %d
-                       AND identifier_ledger_id = %d
-                       AND local_product_lot_is_active = 1
-                       AND is_deleted = 0"
-                     . ($combo_hash ? " AND variant_combo_hash = %s" : " AND variant_combo_hash IS NULL"),
-                    ...array_merge([$block['local_product_name_id'], $block['ledger_id']], $combo_hash ? [$combo_hash] : [])
-                ));
-
-                $wpdb->update(TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS, [
-                    'codes_count' => intval($cnt),
-                    'updated_at'  => $now,
-                ], ['block_id' => $block_id]);
-            }
+            $wpdb->update(TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS, [
+                'codes_count' => intval($cnt),
+                'updated_at'  => $now,
+            ], ['block_id' => $block_id]);
         }
 
         self::json_ok([], 'Đã gỡ mã khỏi sản phẩm.');
@@ -1282,10 +1265,8 @@ class TGS_Identifier_Ajax
 
         if (!$block) self::json_err('Không tìm thấy khối.');
 
-        $combo_hash = $block['variant_combo_hash'];
-        $where_combo = $combo_hash ? " AND l.variant_combo_hash = %s" : " AND l.variant_combo_hash IS NULL";
-        $base_params = [$block['local_product_name_id'], $block['ledger_id']];
-        if ($combo_hash) $base_params[] = $combo_hash;
+        // Query bằng block_id chính xác — không còn phụ thuộc combo_hash
+        $base_params = [$block_id];
 
         $where_keyword = '';
         if ($keyword !== '') {
@@ -1295,8 +1276,8 @@ class TGS_Identifier_Ajax
 
         $total = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM " . self::lots_table() . " l
-             WHERE l.local_product_name_id = %d AND l.identifier_ledger_id = %d
-               AND l.is_deleted = 0" . $where_combo . $where_keyword,
+             WHERE l.block_id = %d
+               AND l.is_deleted = 0" . $where_keyword,
             ...$base_params
         ));
 
@@ -1306,8 +1287,8 @@ class TGS_Identifier_Ajax
                     l.local_product_lot_is_active, l.created_at, l.updated_at,
                     l.exp_date, l.lot_code
              FROM " . self::lots_table() . " l
-             WHERE l.local_product_name_id = %d AND l.identifier_ledger_id = %d
-               AND l.is_deleted = 0" . $where_combo . $where_keyword . "
+             WHERE l.block_id = %d
+               AND l.is_deleted = 0" . $where_keyword . "
              ORDER BY l.local_product_lot_is_active DESC, l.updated_at DESC LIMIT %d OFFSET %d",
             ...array_merge($base_params, [$per_page, $offset])
         ), ARRAY_A);
