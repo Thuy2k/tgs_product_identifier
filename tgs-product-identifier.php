@@ -57,13 +57,14 @@ add_filter('tgs_shop_dashboard_routes', function ($routes) {
     $routes['idtf-blank-list']   = ['DS phiếu sinh mã',    $dir . 'blank-codes/list.php'];
     $routes['idtf-blank-detail'] = ['Chi tiết phiếu mã',   $dir . 'blank-codes/detail.php'];
     $routes['idtf-workspace']    = ['Định danh sản phẩm',  $dir . 'identify/workspace.php'];
+    $routes['idtf-product-codes'] = ['Thống kê mã SP',      $dir . 'identify/product-codes.php'];
     $routes['idtf-variants']     = ['Quản lý biến thể',    $dir . 'variants/list.php'];
     return $routes;
 });
 
 // ── Sidebar Menu ─────────────────────────────────────────────────────────────
 add_action('tgs_shop_sidebar_menu', function ($current_view) {
-    $views = ['idtf-blank-create', 'idtf-blank-list', 'idtf-blank-detail', 'idtf-workspace', 'idtf-variants'];
+    $views = ['idtf-blank-create', 'idtf-blank-list', 'idtf-blank-detail', 'idtf-workspace', 'idtf-product-codes', 'idtf-variants'];
     $is_active = in_array($current_view, $views);
     $open = $is_active ? ' active open' : '';
     $href = function_exists('tgs_url') ? function ($v) { return tgs_url($v); } : function ($v) {
@@ -84,6 +85,9 @@ add_action('tgs_shop_sidebar_menu', function ($current_view) {
             </li>
             <li class="menu-item<?php echo ($current_view === 'idtf-workspace') ? ' active' : ''; ?>">
                 <a href="<?php echo esc_url($href('idtf-workspace')); ?>" class="menu-link"><div>Định danh sản phẩm</div></a>
+            </li>
+            <li class="menu-item<?php echo $current_view === 'idtf-product-codes' ? ' active' : ''; ?>">
+                <a href="<?php echo esc_url($href('idtf-product-codes')); ?>" class="menu-link"><div>Thống kê mã SP</div></a>
             </li>
             <li class="menu-item<?php echo $current_view === 'idtf-variants' ? ' active' : ''; ?>">
                 <a href="<?php echo esc_url($href('idtf-variants')); ?>" class="menu-link"><div>Quản lý biến thể</div></a>
@@ -126,6 +130,10 @@ add_action('admin_enqueue_scripts', function () {
     if ($view === 'idtf-workspace') {
         wp_enqueue_script('tgs-idtf-workspace', TGS_IDTF_URL . 'assets/js/identify-workspace.js', ['jquery'], TGS_IDTF_VERSION, true);
         wp_localize_script('tgs-idtf-workspace', 'tgsIdtf', $localize);
+    }
+    if ($view === 'idtf-product-codes') {
+        wp_enqueue_script('tgs-idtf-product-codes', TGS_IDTF_URL . 'assets/js/product-codes.js', ['jquery'], TGS_IDTF_VERSION, true);
+        wp_localize_script('tgs-idtf-product-codes', 'tgsIdtf', $localize);
     }
     if ($view === 'idtf-variants') {
         wp_enqueue_script('tgs-idtf-variants', TGS_IDTF_URL . 'assets/js/variant-manager.js', ['jquery'], TGS_IDTF_VERSION, true);

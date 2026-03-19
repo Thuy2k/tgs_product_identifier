@@ -1,0 +1,225 @@
+# Tài liệu truy vấn mã định danh — dùng cho POS bán hàng lẻ
+# Plugin: tgs_product_identifier
+# Ngày tạo: 19/03/2026
+# ================================================================
+
+## BẢNG CHÍNH SỬ DỤNG
+
+| Bảng                           | Vai trò                                      |
+|--------------------------------|----------------------------------------------|
+| wp_global_product_lots         | Mỗi row = 1 mã barcode (lot), chứa trạng thái, SKU, HSD, mã lô, biến thể combo hash |
+| wp_{blog_id}_local_product_name| Sản phẩm gốc (tên, SKU, barcode, giá…)      |
+| wp_global_product_variants     | Biến thể (màu, size, HSD, hương vị…)        |
+| wp_global_lot_variant_map      | Map: lot ↔ variant (many-to-many)            |
+| wp_global_identify_blocks      | Khối SP trong phiếu, chứa exp_date, lot_code, variant_ids, variant_combo_hash |
+
+## CỘT QUAN TRỌNG TRÊN wp_global_product_lots
+
+| Cột                         | Ý nghĩa                                    |
+|-----------------------------|---------------------------------------------|
+| global_product_lot_id       | ID mã (PK)                                 |
+| global_product_lot_barcode  | Mã barcode (quét ở POS)                    |
+| local_product_name_id       | ID sản phẩm trên site                      |
+| local_product_sku           | SKU sản phẩm (dùng JOIN cross-site)        |
+| local_product_lot_is_active | Trạng thái: 100=trống, 1=đã định danh, 0=đã bán |
+| variant_combo_hash          | MD5 hash của combo biến thể (sort IDs)     |
+| identifier_ledger_id        | ID phiếu định danh đã gắn                  |
+| exp_date                    | Hạn sử dụng (DATE)                         |
+| lot_code                    | Mã lô (VARCHAR 255)                        |
+| to_blog_id                  | Site được gán (shop nào)                    |
+
+## CÁCH TẠO variant_combo_hash
+
+```php
+function combo_hash($variant_ids) {
+    if (empty($variant_ids)) return null;
+    $ids = array_map('intval', $variant_ids);
+    sort($ids);
+    return md5(implode(',', $ids));
+}
+```
+Ví dụ: variant_ids = [5, 3] → sort → [3, 5] → md5("3,5") = "abc123..."
+
+# ================================================================
+# CÁCH 1: TỪ TÊN SẢN PHẨM → BIẾN THỂ → MÃ ĐỊNH DANH
+# ================================================================
+
+## Bước 1: Tìm sản phẩm theo tên hoặc SKU
+
+```sql
+SELECT local_product_name_id, local_product_name, local_product_sku,
+       local_product_barcode_main, local_product_price_after_tax
+FROM wp_{blog_id}_local_product_name
+WHERE (local_product_name LIKE '%keyword%' OR local_product_sku LIKE '%keyword%')
+  AND (is_deleted IS NULL OR is_deleted = 0)
+ORDER BY local_product_name ASC
+LIMIT 20;
+```
+
+## Bước 2: Lấy danh sách combo biến thể + số lượng mã cho 1 SKU
+
+```sql
+-- Lấy tất cả combo biến thể của 1 SKU (nhóm theo variant_combo_hash)
+SELECT l.variant_combo_hash,
+       COUNT(*) as total_codes,
+       SUM(CASE WHEN l.local_product_lot_is_active = 1 THEN 1 ELSE 0 END) as chua_ban,
+       SUM(CASE WHEN l.local_product_lot_is_active = 0 THEN 1 ELSE 0 END) as da_ban
+FROM wp_global_product_lots l
+WHERE l.local_product_sku = 'SKU_CAN_TIM'
+  AND l.local_product_lot_is_active IN (0, 1)
+  AND l.is_deleted = 0
+GROUP BY l.variant_combo_hash;
+```
+
+Kết quả: 
+- variant_combo_hash = NULL → mã không có biến thể
+- variant_combo_hash = 'abc...' → mã có combo biến thể cụ thể
+
+## Bước 3: Lấy tên biến thể cho 1 combo_hash (qua blocks table)
+
+```sql
+-- Lấy variant_ids từ blocks
+SELECT DISTINCT variant_combo_hash, variant_ids
+FROM wp_global_identify_blocks
+WHERE variant_combo_hash = 'HASH_CAN_TIM'
+  AND is_deleted = 0
+LIMIT 1;
+
+-- variant_ids là JSON array, ví dụ [3, 5]
+-- Decode rồi query tên:
+SELECT variant_id, variant_type, variant_label, variant_value
+FROM wp_global_product_variants
+WHERE variant_id IN (3, 5) AND is_deleted = 0;
+```
+
+## Bước 4: Lấy danh sách mã barcode theo combo chính xác
+
+```sql
+-- Lấy mã định danh thuộc 1 combo biến thể cụ thể
+SELECT global_product_lot_id, global_product_lot_barcode,
+       local_product_lot_is_active, exp_date, lot_code,
+       created_at, updated_at
+FROM wp_global_product_lots
+WHERE local_product_sku = 'SKU_CAN_TIM'
+  AND variant_combo_hash = 'HASH_CAN_TIM'
+  AND local_product_lot_is_active IN (0, 1)
+  AND is_deleted = 0
+ORDER BY updated_at DESC;
+
+-- Mã KHÔNG có biến thể:
+-- ... AND variant_combo_hash IS NULL
+
+-- Tất cả mã (bỏ qua biến thể):
+-- Bỏ dòng variant_combo_hash
+```
+
+## Bước 5 (tuỳ chọn): Lọc thêm theo HSD và/hoặc mã lô
+
+```sql
+-- Lọc theo HSD
+AND exp_date = '2026-06-15'
+
+-- Lọc theo mã lô
+AND lot_code = 'LOT2026-A1'
+
+-- Kết hợp cả hai
+AND exp_date = '2026-06-15'
+AND lot_code = 'LOT2026-A1'
+```
+
+# ================================================================
+# CÁCH 2: TỪ MÃ BARCODE → TRUY NGƯỢC SẢN PHẨM + BIẾN THỂ
+# ================================================================
+
+## Bước 1: Quét barcode → lấy thông tin mã
+
+```sql
+SELECT l.global_product_lot_id, l.global_product_lot_barcode,
+       l.local_product_name_id, l.local_product_sku,
+       l.local_product_lot_is_active,
+       l.variant_combo_hash, l.identifier_ledger_id,
+       l.exp_date, l.lot_code, l.to_blog_id,
+       p.local_product_name, p.local_product_price_after_tax,
+       p.local_product_barcode_main
+FROM wp_global_product_lots l
+LEFT JOIN wp_{blog_id}_local_product_name p
+   ON l.local_product_sku IS NOT NULL
+  AND p.local_product_sku = l.local_product_sku
+  AND (p.is_deleted IS NULL OR p.is_deleted = 0)
+WHERE l.global_product_lot_barcode = 'BARCODE_QUET_DUOC'
+  AND l.is_deleted = 0;
+```
+
+## Bước 2: Lấy biến thể của mã (qua lot_variant_map)
+
+```sql
+SELECT v.variant_id, v.variant_type, v.variant_label, v.variant_value
+FROM wp_global_lot_variant_map m
+JOIN wp_global_product_variants v ON m.variant_id = v.variant_id AND v.is_deleted = 0
+WHERE m.global_product_lot_id = {LOT_ID};
+```
+
+## Tóm lại: 1 query duy nhất truy ngược đầy đủ
+
+```sql
+SELECT l.global_product_lot_barcode AS barcode,
+       l.local_product_lot_is_active AS trang_thai,
+       l.exp_date AS han_su_dung,
+       l.lot_code AS ma_lo,
+       p.local_product_name AS ten_san_pham,
+       p.local_product_sku AS sku,
+       p.local_product_price_after_tax AS gia,
+       GROUP_CONCAT(
+           CONCAT(v.variant_label, ': ', v.variant_value)
+           ORDER BY v.variant_id SEPARATOR ' | '
+       ) AS bien_the
+FROM wp_global_product_lots l
+LEFT JOIN wp_{blog_id}_local_product_name p
+   ON l.local_product_sku IS NOT NULL
+  AND p.local_product_sku = l.local_product_sku
+  AND (p.is_deleted IS NULL OR p.is_deleted = 0)
+LEFT JOIN wp_global_lot_variant_map m ON m.global_product_lot_id = l.global_product_lot_id
+LEFT JOIN wp_global_product_variants v ON v.variant_id = m.variant_id AND v.is_deleted = 0
+WHERE l.global_product_lot_barcode = 'BARCODE_QUET_DUOC'
+  AND l.is_deleted = 0
+GROUP BY l.global_product_lot_id;
+```
+
+Kết quả ví dụ:
+| barcode    | trang_thai | han_su_dung | ma_lo      | ten_san_pham | sku       | gia   | bien_the                      |
+|------------|-----------|-------------|------------|-------------|-----------|-------|-------------------------------|
+| TGS-ABC123 | 1         | 2026-06-15  | LOT2026-A1 | Sữa Meiji   | MEIJI-01  | 350000| Kích cỡ: 800g \| Hương vị: Vani |
+
+# ================================================================
+# GHI CHÚ CHO POS
+# ================================================================
+
+## Khi bán hàng (quét mã):
+1. Quét barcode → query Cách 2 Bước 1
+2. Kiểm tra local_product_lot_is_active:
+   - = 1 → cho phép bán → UPDATE SET local_product_lot_is_active = 0
+   - = 0 → MÃ ĐÃ BÁN, không cho bán lại
+   - = 100 → MÃ TRỐNG chưa định danh, không cho bán
+3. Hiển thị: tên SP, biến thể, HSD, mã lô (từ query)
+4. Ghi nhận giao dịch (bảng riêng POS)
+
+## Khi chọn từ danh sách SP:
+1. Search sản phẩm theo tên/SKU (Cách 1 Bước 1)
+2. Hiện danh sách combo biến thể + số lượng còn (Cách 1 Bước 2, chỉ lấy chua_ban > 0)
+3. Khách chọn combo → hiện list mã available (Cách 1 Bước 4, status = 1)
+4. Chọn mã hoặc auto-pick mã đầu tiên → bán
+
+## INDEX đã có (đảm bảo tốc độ):
+- idx_barcode (global_product_lot_barcode) — tra cứu nhanh
+- idx_local_product_sku (local_product_sku) — group by SKU nhanh
+- idx_variant_combo_hash (variant_combo_hash) trên identify_blocks — đã có
+- idx_exp_date (exp_date) — lọc HSD
+- idx_lot_code (lot_code) — lọc mã lô
+- idx_local_active (local_product_lot_is_active) — lọc trạng thái
+
+## Lưu ý cần tạo thêm index (nếu data lớn):
+```sql
+-- Composite index cho truy vấn phổ biến nhất
+ALTER TABLE wp_global_product_lots
+ADD INDEX idx_sku_combo_active (local_product_sku, variant_combo_hash, local_product_lot_is_active);
+```

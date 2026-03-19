@@ -48,6 +48,10 @@ class TGS_Identifier_Ajax
             'tgs_idtf_delete_variant',
             'tgs_idtf_search_products',
             'tgs_idtf_quick_create_product',
+            // G: Product codes (thống kê mã theo SP + biến thể)
+            'tgs_idtf_get_product_codes_list',
+            'tgs_idtf_get_product_codes_detail',
+            'tgs_idtf_export_product_codes',
         ];
 
         foreach ($actions as $action) {
@@ -1354,6 +1358,9 @@ class TGS_Identifier_Ajax
             'barcode'              => $lot['global_product_lot_barcode'],
             'status'               => $status,
             'product_name'         => $lot['local_product_name'],
+            'sku'                  => $lot['local_product_sku'],
+            'exp_date'             => $lot['exp_date'],
+            'lot_code'             => $lot['lot_code'],
             'identifier_ledger_id' => $lot['identifier_ledger_id'],
         ];
 
@@ -1576,5 +1583,396 @@ class TGS_Identifier_Ajax
                 'local_product_is_tracking'     => 1,
             ]
         ], 'Đã thêm sản phẩm.');
+    }
+
+    /* =========================================================================
+     * G. THỐNG KÊ MÃ ĐỊNH DANH THEO SẢN PHẨM + BIẾN THỂ
+     * ========================================================================= */
+
+    /**
+     * Lấy danh sách sản phẩm có mã định danh + thống kê combo biến thể
+     */
+    public static function tgs_idtf_get_product_codes_list()
+    {
+        self::verify();
+        global $wpdb;
+
+        $search   = sanitize_text_field($_POST['search'] ?? '');
+        $page     = max(1, intval($_POST['page'] ?? 1));
+        $per_page = min(100, max(10, intval($_POST['per_page'] ?? 20)));
+
+        $lots_tbl = self::lots_table();
+        $prod_tbl = self::product_table();
+
+        // Lấy danh sách SKU có mã đã định danh (status=1)
+        $where_search = '';
+        $params = [];
+        if ($search !== '') {
+            $like = '%' . $wpdb->esc_like($search) . '%';
+            $where_search = " AND (p.local_product_name LIKE %s OR p.local_product_sku LIKE %s OR p.local_product_barcode_main LIKE %s)";
+            $params = [$like, $like, $like];
+        }
+
+        // Count distinct products
+        $count_sql = "SELECT COUNT(DISTINCT l.local_product_sku)
+                      FROM {$lots_tbl} l
+                      JOIN {$prod_tbl} p ON p.local_product_sku = l.local_product_sku AND (p.is_deleted IS NULL OR p.is_deleted = 0)
+                      WHERE l.local_product_lot_is_active = 1
+                        AND l.local_product_sku IS NOT NULL
+                        AND l.is_deleted = 0" . $where_search;
+        $total = $wpdb->get_var(empty($params) ? $count_sql : $wpdb->prepare($count_sql, ...$params));
+
+        $offset = ($page - 1) * $per_page;
+
+        // Get products with counts — summary per SKU
+        $list_sql = "SELECT p.local_product_name_id, p.local_product_name, p.local_product_sku,
+                            p.local_product_barcode_main, p.local_product_thumbnail,
+                            COUNT(l.global_product_lot_id) as total_codes,
+                            SUM(CASE WHEN l.local_product_lot_is_active = 1 THEN 1 ELSE 0 END) as identified_count,
+                            SUM(CASE WHEN l.local_product_lot_is_active = 0 THEN 1 ELSE 0 END) as sold_count
+                     FROM {$prod_tbl} p
+                     JOIN {$lots_tbl} l ON l.local_product_sku = p.local_product_sku AND l.is_deleted = 0
+                                       AND l.local_product_lot_is_active IN (0, 1)
+                     WHERE (p.is_deleted IS NULL OR p.is_deleted = 0)
+                       AND l.local_product_sku IS NOT NULL" . $where_search . "
+                     GROUP BY p.local_product_sku
+                     ORDER BY total_codes DESC, p.local_product_name ASC
+                     LIMIT %d OFFSET %d";
+        $list_params = array_merge($params, [$per_page, $offset]);
+        $products = $wpdb->get_results($wpdb->prepare($list_sql, ...$list_params), ARRAY_A);
+
+        // For each product, get variant combos (grouped)
+        if ($products) {
+            $skus = array_column($products, 'local_product_sku');
+            $sku_ph = implode(',', array_fill(0, count($skus), '%s'));
+
+            // Get variant combos with counts
+            $combos = $wpdb->get_results($wpdb->prepare(
+                "SELECT l.local_product_sku, l.variant_combo_hash, l.exp_date, l.lot_code,
+                        COUNT(*) as codes_count,
+                        SUM(CASE WHEN l.local_product_lot_is_active = 1 THEN 1 ELSE 0 END) as active_count,
+                        SUM(CASE WHEN l.local_product_lot_is_active = 0 THEN 1 ELSE 0 END) as sold_count
+                 FROM {$lots_tbl} l
+                 WHERE l.local_product_sku IN ({$sku_ph})
+                   AND l.local_product_lot_is_active IN (0, 1)
+                   AND l.is_deleted = 0
+                 GROUP BY l.local_product_sku, l.variant_combo_hash
+                 ORDER BY codes_count DESC",
+                ...$skus
+            ), ARRAY_A);
+
+            // Collect unique combo hashes for variant lookup
+            $hash_set = [];
+            foreach ($combos as $c) {
+                if ($c['variant_combo_hash']) $hash_set[$c['variant_combo_hash']] = true;
+            }
+
+            // Batch-load variant info for all hashes via blocks table
+            $hash_labels = []; // hash => [{label, value}, ...]
+            if (!empty($hash_set)) {
+                $hashes = array_keys($hash_set);
+                $h_ph = implode(',', array_fill(0, count($hashes), '%s'));
+                $block_rows = $wpdb->get_results($wpdb->prepare(
+                    "SELECT DISTINCT variant_combo_hash, variant_ids
+                     FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . "
+                     WHERE variant_combo_hash IN ({$h_ph}) AND is_deleted = 0",
+                    ...$hashes
+                ), ARRAY_A);
+
+                // Collect all variant IDs
+                $all_vids = [];
+                foreach ($block_rows as $br) {
+                    $vids = json_decode($br['variant_ids'] ?? '[]', true) ?: [];
+                    foreach ($vids as $vid) $all_vids[intval($vid)] = true;
+                }
+
+                $var_info = [];
+                if (!empty($all_vids)) {
+                    $v_ids = array_keys($all_vids);
+                    $v_ph = implode(',', array_fill(0, count($v_ids), '%d'));
+                    $v_rows = $wpdb->get_results($wpdb->prepare(
+                        "SELECT variant_id, variant_type, variant_label, variant_value
+                         FROM " . TGS_TABLE_GLOBAL_PRODUCT_VARIANTS . "
+                         WHERE variant_id IN ({$v_ph}) AND is_deleted = 0",
+                        ...$v_ids
+                    ), ARRAY_A);
+                    foreach ($v_rows as $vr) $var_info[intval($vr['variant_id'])] = $vr;
+                }
+
+                foreach ($block_rows as $br) {
+                    $h = $br['variant_combo_hash'];
+                    if (isset($hash_labels[$h])) continue;
+                    $vids = json_decode($br['variant_ids'] ?? '[]', true) ?: [];
+                    $labels = [];
+                    foreach ($vids as $vid) {
+                        $vi = $var_info[intval($vid)] ?? null;
+                        if ($vi) $labels[] = ['label' => $vi['variant_label'], 'value' => $vi['variant_value']];
+                    }
+                    $hash_labels[$h] = $labels;
+                }
+            }
+
+            // Attach combos to products
+            $combo_map = []; // sku => [combo, ...]
+            foreach ($combos as $c) {
+                $sku = $c['local_product_sku'];
+                if (!isset($combo_map[$sku])) $combo_map[$sku] = [];
+                $combo_map[$sku][] = [
+                    'variant_combo_hash' => $c['variant_combo_hash'],
+                    'variants'           => $hash_labels[$c['variant_combo_hash']] ?? [],
+                    'codes_count'        => intval($c['codes_count']),
+                    'active_count'       => intval($c['active_count']),
+                    'sold_count'         => intval($c['sold_count']),
+                ];
+            }
+
+            foreach ($products as &$p) {
+                $p['combos'] = $combo_map[$p['local_product_sku']] ?? [];
+            }
+            unset($p);
+        }
+
+        self::json_ok([
+            'products' => $products ?: [],
+            'total'    => intval($total),
+            'page'     => $page,
+            'pages'    => $per_page > 0 ? (int) ceil($total / $per_page) : 1,
+        ]);
+    }
+
+    /**
+     * Lấy danh sách mã định danh chi tiết theo sản phẩm + combo + HSD/lot filter
+     */
+    public static function tgs_idtf_get_product_codes_detail()
+    {
+        self::verify();
+        global $wpdb;
+
+        $sku        = sanitize_text_field($_POST['sku'] ?? '');
+        $combo_hash = sanitize_text_field($_POST['combo_hash'] ?? '');
+        $exp_date   = sanitize_text_field($_POST['exp_date'] ?? '');
+        $lot_code   = sanitize_text_field($_POST['lot_code'] ?? '');
+        $page       = max(1, intval($_POST['page'] ?? 1));
+        $per_page   = min(200, max(20, intval($_POST['per_page'] ?? 50)));
+
+        if (empty($sku)) self::json_err('SKU không hợp lệ.');
+
+        $lots_tbl = self::lots_table();
+
+        $where = "l.local_product_sku = %s AND l.local_product_lot_is_active IN (0, 1) AND l.is_deleted = 0";
+        $params = [$sku];
+
+        // Combo filter: empty string = no filter, 'null' = no variants, hash = exact combo
+        if ($combo_hash === 'null') {
+            $where .= " AND l.variant_combo_hash IS NULL";
+        } elseif ($combo_hash !== '') {
+            $where .= " AND l.variant_combo_hash = %s";
+            $params[] = $combo_hash;
+        }
+
+        if ($exp_date !== '') {
+            $where .= " AND l.exp_date = %s";
+            $params[] = $exp_date;
+        }
+        if ($lot_code !== '') {
+            $where .= " AND l.lot_code = %s";
+            $params[] = $lot_code;
+        }
+
+        $total = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$lots_tbl} l WHERE {$where}",
+            ...$params
+        ));
+
+        $offset = ($page - 1) * $per_page;
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT l.global_product_lot_id, l.global_product_lot_barcode,
+                    l.local_product_lot_is_active, l.exp_date, l.lot_code,
+                    l.variant_combo_hash, l.identifier_ledger_id,
+                    l.created_at, l.updated_at
+             FROM {$lots_tbl} l
+             WHERE {$where}
+             ORDER BY l.updated_at DESC
+             LIMIT %d OFFSET %d",
+            ...array_merge($params, [$per_page, $offset])
+        ), ARRAY_A);
+
+        // Batch variant labels
+        if ($rows) {
+            $hash_set = [];
+            foreach ($rows as $r) {
+                if ($r['variant_combo_hash']) $hash_set[$r['variant_combo_hash']] = true;
+            }
+            $hash_labels = [];
+            if (!empty($hash_set)) {
+                $hashes = array_keys($hash_set);
+                $h_ph = implode(',', array_fill(0, count($hashes), '%s'));
+                $block_rows = $wpdb->get_results($wpdb->prepare(
+                    "SELECT DISTINCT variant_combo_hash, variant_ids FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . "
+                     WHERE variant_combo_hash IN ({$h_ph}) AND is_deleted = 0",
+                    ...$hashes
+                ), ARRAY_A);
+                $all_vids = [];
+                foreach ($block_rows as $br) {
+                    foreach (json_decode($br['variant_ids'] ?? '[]', true) ?: [] as $vid) $all_vids[intval($vid)] = true;
+                }
+                $var_info = [];
+                if (!empty($all_vids)) {
+                    $v_ids = array_keys($all_vids);
+                    $v_ph = implode(',', array_fill(0, count($v_ids), '%d'));
+                    foreach ($wpdb->get_results($wpdb->prepare(
+                        "SELECT variant_id, variant_label, variant_value FROM " . TGS_TABLE_GLOBAL_PRODUCT_VARIANTS . "
+                         WHERE variant_id IN ({$v_ph}) AND is_deleted = 0", ...$v_ids
+                    ), ARRAY_A) as $vr) $var_info[intval($vr['variant_id'])] = $vr;
+                }
+                foreach ($block_rows as $br) {
+                    $h = $br['variant_combo_hash'];
+                    if (isset($hash_labels[$h])) continue;
+                    $labels = [];
+                    foreach (json_decode($br['variant_ids'] ?? '[]', true) ?: [] as $vid) {
+                        $vi = $var_info[intval($vid)] ?? null;
+                        if ($vi) $labels[] = ['label' => $vi['variant_label'], 'value' => $vi['variant_value']];
+                    }
+                    $hash_labels[$h] = $labels;
+                }
+            }
+
+            foreach ($rows as &$r) {
+                $r['variants'] = $hash_labels[$r['variant_combo_hash']] ?? [];
+            }
+            unset($r);
+        }
+
+        // Aggregate: distinct exp_date + lot_code for filter dropdowns
+        $filters = $wpdb->get_results($wpdb->prepare(
+            "SELECT DISTINCT l.exp_date, l.lot_code
+             FROM {$lots_tbl} l
+             WHERE l.local_product_sku = %s AND l.local_product_lot_is_active IN (0, 1) AND l.is_deleted = 0"
+            . ($combo_hash === 'null' ? " AND l.variant_combo_hash IS NULL" : ($combo_hash !== '' ? $wpdb->prepare(" AND l.variant_combo_hash = %s", $combo_hash) : '')),
+            $sku
+        ), ARRAY_A);
+
+        $exp_dates = [];
+        $lot_codes = [];
+        foreach ($filters as $f) {
+            if ($f['exp_date'] && !in_array($f['exp_date'], $exp_dates)) $exp_dates[] = $f['exp_date'];
+            if ($f['lot_code'] && !in_array($f['lot_code'], $lot_codes)) $lot_codes[] = $f['lot_code'];
+        }
+        sort($exp_dates);
+        sort($lot_codes);
+
+        self::json_ok([
+            'lots'       => $rows ?: [],
+            'total'      => intval($total),
+            'page'       => $page,
+            'pages'      => $per_page > 0 ? (int) ceil($total / $per_page) : 1,
+            'filter_exp_dates' => $exp_dates,
+            'filter_lot_codes' => $lot_codes,
+        ]);
+    }
+
+    /**
+     * Export CSV/Excel danh sách mã theo SP + filter
+     */
+    public static function tgs_idtf_export_product_codes()
+    {
+        if (!check_ajax_referer('tgs_idtf_nonce', 'nonce', false)) {
+            wp_die('Unauthorized', 403);
+        }
+        global $wpdb;
+
+        $sku        = sanitize_text_field($_GET['sku'] ?? '');
+        $combo_hash = sanitize_text_field($_GET['combo_hash'] ?? '');
+        $exp_date   = sanitize_text_field($_GET['exp_date'] ?? '');
+        $lot_code   = sanitize_text_field($_GET['lot_code'] ?? '');
+
+        if (empty($sku)) wp_die('SKU rỗng.');
+
+        $lots_tbl = self::lots_table();
+        $prod_tbl = self::product_table();
+
+        $where = "l.local_product_sku = %s AND l.local_product_lot_is_active IN (0, 1) AND l.is_deleted = 0";
+        $params = [$sku];
+
+        if ($combo_hash === 'null') {
+            $where .= " AND l.variant_combo_hash IS NULL";
+        } elseif ($combo_hash !== '') {
+            $where .= " AND l.variant_combo_hash = %s";
+            $params[] = $combo_hash;
+        }
+        if ($exp_date !== '') { $where .= " AND l.exp_date = %s"; $params[] = $exp_date; }
+        if ($lot_code !== '') { $where .= " AND l.lot_code = %s"; $params[] = $lot_code; }
+
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT l.global_product_lot_barcode, l.local_product_lot_is_active,
+                    l.exp_date, l.lot_code, l.variant_combo_hash,
+                    l.created_at, l.updated_at, p.local_product_name
+             FROM {$lots_tbl} l
+             LEFT JOIN {$prod_tbl} p ON p.local_product_sku = l.local_product_sku AND (p.is_deleted IS NULL OR p.is_deleted = 0)
+             WHERE {$where}
+             ORDER BY l.updated_at DESC
+             LIMIT 10000",
+            ...$params
+        ), ARRAY_A);
+
+        // Variant labels batch
+        $hash_set = [];
+        foreach ($rows as $r) { if ($r['variant_combo_hash']) $hash_set[$r['variant_combo_hash']] = true; }
+        $hash_labels = [];
+        if (!empty($hash_set)) {
+            $hashes = array_keys($hash_set);
+            $h_ph = implode(',', array_fill(0, count($hashes), '%s'));
+            $block_rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT DISTINCT variant_combo_hash, variant_ids FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . "
+                 WHERE variant_combo_hash IN ({$h_ph}) AND is_deleted = 0", ...$hashes
+            ), ARRAY_A);
+            $all_vids = [];
+            foreach ($block_rows as $br) {
+                foreach (json_decode($br['variant_ids'] ?? '[]', true) ?: [] as $vid) $all_vids[intval($vid)] = true;
+            }
+            $var_info = [];
+            if (!empty($all_vids)) {
+                $v_ph = implode(',', array_fill(0, count(array_keys($all_vids)), '%d'));
+                foreach ($wpdb->get_results($wpdb->prepare(
+                    "SELECT variant_id, variant_label, variant_value FROM " . TGS_TABLE_GLOBAL_PRODUCT_VARIANTS . "
+                     WHERE variant_id IN ({$v_ph}) AND is_deleted = 0", ...array_keys($all_vids)
+                ), ARRAY_A) as $vr) $var_info[intval($vr['variant_id'])] = $vr;
+            }
+            foreach ($block_rows as $br) {
+                $h = $br['variant_combo_hash'];
+                if (isset($hash_labels[$h])) continue;
+                $parts = [];
+                foreach (json_decode($br['variant_ids'] ?? '[]', true) ?: [] as $vid) {
+                    $vi = $var_info[intval($vid)] ?? null;
+                    if ($vi) $parts[] = $vi['variant_label'] . ': ' . $vi['variant_value'];
+                }
+                $hash_labels[$h] = implode(' | ', $parts);
+            }
+        }
+
+        // Product name
+        $product_name = !empty($rows) ? ($rows[0]['local_product_name'] ?? $sku) : $sku;
+
+        // Output CSV with BOM for Excel UTF-8
+        $filename = 'ma_dinh_danh_' . sanitize_file_name($sku) . '_' . date('Ymd_His') . '.csv';
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Pragma: no-cache');
+        echo "\xEF\xBB\xBF"; // UTF-8 BOM
+
+        $fp = fopen('php://output', 'w');
+        fputcsv($fp, ['Sản phẩm', 'SKU', 'Mã barcode', 'Trạng thái', 'Biến thể', 'HSD', 'Mã lô', 'Ngày cập nhật']);
+
+        foreach ($rows as $r) {
+            $st = intval($r['local_product_lot_is_active']);
+            $status_label = $st === 1 ? 'Đã định danh' : ($st === 0 ? 'Đã bán' : $st);
+            $var_label = $hash_labels[$r['variant_combo_hash']] ?? 'Không có';
+            $exp = $r['exp_date'] ?: '';
+            $lot = $r['lot_code'] ?: '';
+
+            fputcsv($fp, [$product_name, $sku, $r['global_product_lot_barcode'], $status_label, $var_label, $exp, $lot, $r['updated_at']]);
+        }
+        fclose($fp);
+        exit;
     }
 }

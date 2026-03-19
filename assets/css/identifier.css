@@ -356,6 +356,35 @@
 }
 
 /* ── Quantity preset chips ─────────────────────────────────────── */
+
+/* ── Product Codes page ────────────────────────────────────────── */
+.pc-product-card {
+    border-left: 3px solid #696cff;
+    transition: box-shadow 0.15s ease;
+}
+.pc-product-card:hover {
+    box-shadow: 0 4px 16px rgba(105,108,255,0.12);
+}
+.pc-combo-row:hover {
+    background: #f5f5ff !important;
+}
+.pc-combo-row td {
+    vertical-align: middle;
+}
+.pc-qr-card {
+    background: #f5f5f9; border: 1px solid #e7e7e8;
+    border-left: 3px solid #696cff; border-radius: 8px;
+    padding: 12px 16px; font-size: 13px;
+}
+.pc-qr-card.pc-qr-notfound {
+    border-left-color: #ff3e1d; color: #ff3e1d;
+}
+.pc-qr-row {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+}
+.pc-qr-row + .pc-qr-row {
+    margin-top: 6px;
+}
 .idtf-qty-chip {
     display: inline-flex; align-items: center; justify-content: center;
     padding: 2px 10px; border-radius: 20px; font-size: 11px;
