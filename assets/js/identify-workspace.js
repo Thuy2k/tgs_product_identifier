@@ -133,12 +133,16 @@
      * B. TAB MANAGEMENT
      * ===================================================================== */
     function openLedgerTab(ledgerId) {
+        ledgerId = parseInt(ledgerId);
         var exists = openTabs.filter(function (t) { return t.ledger_id === ledgerId; });
         if (!exists.length) {
             // Need to load ledger data first to get title
             ajax('tgs_idtf_get_identify_detail', { ledger_id: ledgerId }, function (d) {
+                // Re-check to prevent race condition (double-click)
+                var already = openTabs.filter(function (t) { return t.ledger_id === ledgerId; });
+                if (already.length) { activateTab(ledgerId); renderTabs(); return; }
                 openTabs.push({
-                    ledger_id: d.ledger.local_ledger_id,
+                    ledger_id: parseInt(d.ledger.local_ledger_id),
                     title: d.ledger.local_ledger_title,
                     ticket_code: d.ledger.local_ledger_code
                 });
