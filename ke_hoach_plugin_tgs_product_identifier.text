@@ -674,6 +674,8 @@ MỤC LỤC:
     ✅ LUÔN JOIN bằng local_product_sku
     ✅ Khi gắn mã (assign): ghi local_product_sku từ block vào lot
     ✅ Khi gỡ mã (unassign) / xóa khối (remove_block): reset local_product_sku = NULL
+    ✅ Biến thể (get_variants, save_variant): query/check duplicate bằng local_product_sku
+       → Tất cả site cùng SKU thấy cùng danh sách biến thể
 
 
 ================================================================================
