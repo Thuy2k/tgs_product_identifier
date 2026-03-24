@@ -64,7 +64,9 @@ add_filter('tgs_shop_dashboard_routes', function ($routes) {
 
 // ── Sidebar Menu ─────────────────────────────────────────────────────────────
 add_action('tgs_shop_sidebar_menu', function ($current_view) {
-    $views = ['idtf-blank-create', 'idtf-blank-list', 'idtf-blank-detail', 'idtf-workspace', 'idtf-product-codes', 'idtf-variants'];
+    // Chỉ hiển thị 2 menu: Thống kê mã SP + Quản lý biến thể
+    // Các menu ẩn tạm: idtf-blank-create, idtf-blank-list, idtf-blank-detail, idtf-workspace
+    $views = ['idtf-product-codes', 'idtf-variants'];
     $is_active = in_array($current_view, $views);
     $open = $is_active ? ' active open' : '';
     $href = function_exists('tgs_url') ? function ($v) { return tgs_url($v); } : function ($v) {
@@ -74,18 +76,9 @@ add_action('tgs_shop_sidebar_menu', function ($current_view) {
     <li class="menu-item<?php echo $open; ?>">
         <a href="javascript:void(0);" class="menu-link menu-toggle">
             <i class="menu-icon tf-icons bx bx-purchase-tag"></i>
-            <div>Mã định danh SP</div>
+            <div>Quản lý biến thể</div>
         </a>
         <ul class="menu-sub">
-            <li class="menu-item<?php echo $current_view === 'idtf-blank-create' ? ' active' : ''; ?>">
-                <a href="<?php echo esc_url($href('idtf-blank-create')); ?>" class="menu-link"><div>Sinh mã trống</div></a>
-            </li>
-            <li class="menu-item<?php echo $current_view === 'idtf-blank-list' ? ' active' : ''; ?>">
-                <a href="<?php echo esc_url($href('idtf-blank-list')); ?>" class="menu-link"><div>DS phiếu sinh mã</div></a>
-            </li>
-            <li class="menu-item<?php echo ($current_view === 'idtf-workspace') ? ' active' : ''; ?>">
-                <a href="<?php echo esc_url($href('idtf-workspace')); ?>" class="menu-link"><div>Định danh sản phẩm</div></a>
-            </li>
             <li class="menu-item<?php echo $current_view === 'idtf-product-codes' ? ' active' : ''; ?>">
                 <a href="<?php echo esc_url($href('idtf-product-codes')); ?>" class="menu-link"><div>Thống kê mã SP</div></a>
             </li>

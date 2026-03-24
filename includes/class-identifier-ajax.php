@@ -1115,6 +1115,7 @@ class TGS_Identifier_Ajax
                 'local_product_lot_is_active'  => 1,
                 'global_product_lot_is_active' => 1,
                 'variant_combo_hash'           => $combo_hash,
+                'variant_ids'                  => !empty($variant_ids) ? wp_json_encode(array_map('intval', $variant_ids)) : null,
                 'identifier_ledger_id'         => $ledger_id,
                 'block_id'                     => $block_id,
                 'to_blog_id'                   => $block['source_blog_id'],
