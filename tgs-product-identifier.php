@@ -63,7 +63,7 @@ add_filter('tgs_shop_dashboard_routes', function ($routes) {
 });
 
 // ── Sidebar Menu ─────────────────────────────────────────────────────────────
-add_action('tgs_shop_sidebar_menu', function ($current_view) {
+add_action('tgs_shop_product_menu', function ($current_view) {
     // Chỉ hiển thị 2 menu: Thống kê mã SP + Quản lý biến thể
     // Các menu ẩn tạm: idtf-blank-create, idtf-blank-list, idtf-blank-detail, idtf-workspace
     $views = ['idtf-product-codes', 'idtf-variants'];
