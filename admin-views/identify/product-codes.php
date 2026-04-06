@@ -1,6 +1,6 @@
 <?php
 /**
- * Thống kê mã định danh theo sản phẩm + biến thể
+ * Thống kê mã định danh theo sản phẩm
  * @package tgs_product_identifier
  */
 if (!defined('ABSPATH')) exit;
@@ -62,7 +62,7 @@ if (!defined('ABSPATH')) exit;
     </nav>
 </div>
 
-<!-- MODAL: Chi tiết mã theo combo -->
+<!-- MODAL: Chi tiết mã -->
 <div class="modal fade" id="modalProductCodes" tabindex="-1">
     <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content">
@@ -73,9 +73,6 @@ if (!defined('ABSPATH')) exit;
             <div class="modal-body">
                 <!-- Product info -->
                 <div id="pcModalProductInfo" class="idtf-modal-product-info mb-3"></div>
-
-                <!-- Active combo badge -->
-                <div id="pcModalComboInfo" class="mb-3"></div>
 
                 <!-- Filters row -->
                 <div class="row g-2 mb-3">
@@ -109,14 +106,13 @@ if (!defined('ABSPATH')) exit;
                                 <th>#</th>
                                 <th>Mã barcode</th>
                                 <th>Trạng thái</th>
-                                <th>Biến thể</th>
                                 <th>HSD</th>
                                 <th>Mã lô</th>
                                 <th>Cập nhật</th>
                             </tr>
                         </thead>
                         <tbody id="pcModalCodesBody">
-                            <tr><td colspan="7" class="text-center text-muted py-3">Chọn sản phẩm và bấm xem mã.</td></tr>
+                            <tr><td colspan="6" class="text-center text-muted py-3">Chọn sản phẩm và bấm xem mã.</td></tr>
                         </tbody>
                     </table>
                 </div>

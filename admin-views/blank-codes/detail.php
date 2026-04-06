@@ -102,14 +102,13 @@ $ledger_id = intval($_GET['ledger_id'] ?? 0);
                         <th>Mã barcode</th>
                         <th>Trạng thái</th>
                         <th>Sản phẩm</th>
-                        <th>Biến thể</th>
                         <th>HSD</th>
                         <th>Mã lô</th>
                         <th>Ngày tạo</th>
                     </tr>
                 </thead>
                 <tbody id="lotsTableBody">
-                    <tr><td colspan="9" class="text-center py-4 text-muted">Đang tải...</td></tr>
+                    <tr><td colspan="8" class="text-center py-4 text-muted">Đang tải...</td></tr>
                 </tbody>
             </table>
         </div>

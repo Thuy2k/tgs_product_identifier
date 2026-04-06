@@ -154,14 +154,6 @@
             var isChecked = selected[r.global_product_lot_id] ? ' checked' : '';
             var dateStr = r.created_at ? r.created_at.substring(0, 16) : '—';
 
-            var varTags = '—';
-            if (r.variants && r.variants.length) {
-                varTags = '';
-                $.each(r.variants, function (_, v) {
-                    varTags += '<span class="badge bg-label-primary me-1" style="font-size:10px;">' + esc(v.label) + ': ' + esc(v.value) + '</span>';
-                });
-            }
-
             var expStr = '—';
             if (r.exp_date) {
                 var ep = r.exp_date.split('-');
@@ -175,7 +167,6 @@
                 + '<td><code>' + esc(r.global_product_lot_barcode) + '</code></td>'
                 + '<td>' + badge + '</td>'
                 + '<td>' + esc(r.local_product_name || '—') + '</td>'
-                + '<td>' + varTags + '</td>'
                 + '<td>' + expStr + '</td>'
                 + '<td>' + esc(r.lot_code || '—') + '</td>'
                 + '<td>' + dateStr + '</td>'

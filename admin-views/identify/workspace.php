@@ -173,15 +173,6 @@ if (!defined('ABSPATH')) exit;
                     </div>
                 </div>
 
-                <!-- Variant select -->
-                <div id="blockVariantSection" style="display:none;">
-                    <label class="form-label fw-semibold">Chọn biến thể (nhiều lựa chọn)</label>
-                    <div id="blockVariantList" class="d-flex flex-wrap gap-2 mb-2"></div>
-                    <button type="button" class="btn btn-sm btn-outline-info" id="btnBlockQuickVariant">
-                        <i class="bx bx-plus me-1"></i>Thêm nhanh biến thể
-                    </button>
-                </div>
-
                 <!-- HSD + Mã lô (tuỳ chọn) -->
                 <div class="mt-3 pt-3 border-top">
                     <div class="d-flex align-items-center mb-2">
@@ -309,53 +300,6 @@ if (!defined('ABSPATH')) exit;
                     <span id="viewCodesInfo" class="text-muted" style="font-size:12px;"></span>
                     <nav><ul class="pagination pagination-sm mb-0" id="viewCodesPager"></ul></nav>
                 </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- MODAL: Thêm nhanh biến thể -->
-<div class="modal fade" id="modalQuickVariant" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content idtf-modal-elevated">
-            <div class="modal-header">
-                <h5 class="modal-title">Thêm nhanh biến thể</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Loại biến thể</label>
-                    <select id="qvType" class="form-select">
-                        <option value="size">Kích cỡ</option>
-                        <option value="color">Màu sắc</option>
-                        <option value="expiry">Hạn sử dụng</option>
-                        <option value="flavor">Hương vị</option>
-                        <option value="weight">Trọng lượng</option>
-                        <option value="age_range">Độ tuổi</option>
-                        <option value="custom">Tùy chỉnh</option>
-                    </select>
-                </div>
-                <div class="mb-2" id="qvPresetsArea">
-                    <label class="form-label fw-semibold mb-1">Chọn nhanh:</label>
-                    <div id="qvPresetChips" class="d-flex flex-wrap gap-1"></div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Nhãn (Label)</label>
-                    <input type="text" id="qvLabel" class="form-control" placeholder="VD: Kích cỡ" />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Giá trị</label>
-                    <input type="text" id="qvValue" class="form-control" placeholder="VD: M, L, XL..." />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">SKU suffix</label>
-                    <input type="text" id="qvSkuSuffix" class="form-control" placeholder="VD: -M, -XL..." />
-                    <small class="text-muted">Hậu tố ghép vào SKU sản phẩm gốc</small>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
-                <button class="btn btn-primary" id="btnQvSave"><i class="bx bx-save me-1"></i>Lưu biến thể</button>
             </div>
         </div>
     </div>

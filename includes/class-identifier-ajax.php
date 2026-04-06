@@ -7,7 +7,7 @@
  * Nhóm C: Khối sản phẩm (Product Blocks)
  * Nhóm D: Quét & gắn mã (Scan & Assign)
  * Nhóm E: Tìm mã nhanh (Quick Search)
- * Nhóm F: Biến thể + Sản phẩm
+ * Nhóm F: Sản phẩm
  *
  * @package tgs_product_identifier
  */
@@ -34,7 +34,6 @@ class TGS_Identifier_Ajax
             // C: Product blocks
             'tgs_idtf_add_product_block',
             'tgs_idtf_remove_product_block',
-            'tgs_idtf_update_block_variants',
             // D: Scan & assign
             'tgs_idtf_scan_code',
             'tgs_idtf_assign_codes_to_block',
@@ -42,14 +41,11 @@ class TGS_Identifier_Ajax
             'tgs_idtf_get_block_codes',
             // E: Quick search
             'tgs_idtf_search_code',
-            // F: Variants + Products
-            'tgs_idtf_get_variants',
-            'tgs_idtf_save_variant',
-            'tgs_idtf_delete_variant',
+            // F: Products
             'tgs_idtf_search_products',
             'tgs_idtf_quick_create_product',
             'tgs_idtf_generate_sku',
-            // G: Product codes (thống kê mã theo SP + biến thể)
+            // G: Product codes (thống kê mã theo SP)
             'tgs_idtf_get_product_codes_list',
             'tgs_idtf_get_product_codes_detail',
             'tgs_idtf_export_product_codes',
@@ -208,17 +204,6 @@ class TGS_Identifier_Ajax
         return $barcode; // fallback — xác suất trùng cực thấp sau 5 lần
     }
 
-    /**
-     * Tính variant combo hash
-     */
-    private static function combo_hash($variant_ids)
-    {
-        if (empty($variant_ids)) return null;
-        $ids = array_map('intval', $variant_ids);
-        sort($ids);
-        return md5(implode(',', $ids));
-    }
-
     /* =========================================================================
      * A. SINH MÃ TRỐNG (Blank Codes)
      * ========================================================================= */
@@ -295,7 +280,6 @@ class TGS_Identifier_Ajax
                 'local_product_lot_is_active'  => 100,
                 'source_blog_id'               => $blog_id,
                 'to_blog_id'                   => $blog_id,
-                'variant_combo_hash'           => null,
                 'identifier_ledger_id'         => null,
                 'user_id'                      => $user_id,
                 'is_deleted'                   => 0,
@@ -501,7 +485,7 @@ class TGS_Identifier_Ajax
         $rows = $wpdb->get_results($wpdb->prepare(
             "SELECT l.global_product_lot_id, l.global_product_lot_barcode,
                     l.local_product_name_id, l.local_product_lot_is_active,
-                    l.variant_combo_hash, l.identifier_ledger_id, l.created_at,
+                    l.identifier_ledger_id, l.created_at,
                     l.exp_date, l.lot_code,
                     p.local_product_name
              FROM {$lots_tbl} l
@@ -514,41 +498,6 @@ class TGS_Identifier_Ajax
              LIMIT %d OFFSET %d",
             ...array_merge($params, [$per_page, $offset])
         ), ARRAY_A);
-
-        // Enrich: batch-load variant labels for identified lots
-        $lot_ids_for_vars = [];
-        if ($rows) {
-            foreach ($rows as $r) {
-                if (!empty($r['global_product_lot_id']) && intval($r['local_product_lot_is_active']) === 1) {
-                    $lot_ids_for_vars[] = intval($r['global_product_lot_id']);
-                }
-            }
-        }
-        $variant_map = []; // lot_id => [ {label, value}, ... ]
-        if (!empty($lot_ids_for_vars)) {
-            $ph = implode(',', array_fill(0, count($lot_ids_for_vars), '%d'));
-            $var_rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT m.global_product_lot_id, v.variant_label, v.variant_value
-                 FROM " . TGS_TABLE_GLOBAL_LOT_VARIANT_MAP . " m
-                 JOIN " . TGS_TABLE_GLOBAL_PRODUCT_VARIANTS . " v ON v.variant_id = m.variant_id AND v.is_deleted = 0
-                 WHERE m.global_product_lot_id IN ({$ph})
-                 ORDER BY v.variant_sort_order ASC, v.variant_id ASC",
-                ...$lot_ids_for_vars
-            ), ARRAY_A);
-            foreach ($var_rows as $vr) {
-                $lid = intval($vr['global_product_lot_id']);
-                if (!isset($variant_map[$lid])) $variant_map[$lid] = [];
-                $variant_map[$lid][] = ['label' => $vr['variant_label'], 'value' => $vr['variant_value']];
-            }
-        }
-        // Attach variants to rows
-        if ($rows) {
-            foreach ($rows as &$r) {
-                $lid = intval($r['global_product_lot_id']);
-                $r['variants'] = $variant_map[$lid] ?? [];
-            }
-            unset($r);
-        }
 
         self::json_ok([
             'lots'  => $rows ?: [],
@@ -823,21 +772,6 @@ class TGS_Identifier_Ajax
             $ledger_id
         ), ARRAY_A);
 
-        // Enrich blocks with variant info
-        foreach ($blocks as &$block) {
-            $v_ids = json_decode($block['variant_ids'] ?? '[]', true) ?: [];
-            $block['variants'] = [];
-            if (!empty($v_ids)) {
-                $vph = implode(',', array_fill(0, count($v_ids), '%d'));
-                $block['variants'] = $wpdb->get_results($wpdb->prepare(
-                    "SELECT variant_id, variant_type, variant_label, variant_value
-                     FROM " . TGS_TABLE_GLOBAL_PRODUCT_VARIANTS . " WHERE variant_id IN ({$vph}) AND is_deleted = 0",
-                    ...$v_ids
-                ), ARRAY_A);
-            }
-        }
-        unset($block);
-
         self::json_ok([
             'ledger' => $ledger,
             'blocks' => $blocks,
@@ -859,7 +793,6 @@ class TGS_Identifier_Ajax
         $ledger_id  = intval($_POST['ledger_id'] ?? 0);
         $product_id = intval($_POST['product_id'] ?? 0);
         $blog_id    = intval($_POST['blog_id'] ?? get_current_blog_id());
-        $variant_ids = json_decode(stripslashes($_POST['variant_ids'] ?? '[]'), true) ?: [];
         $exp_date   = sanitize_text_field($_POST['exp_date'] ?? '');
         $lot_code   = sanitize_text_field($_POST['lot_code'] ?? '');
 
@@ -867,7 +800,6 @@ class TGS_Identifier_Ajax
         if ($product_id <= 0) self::json_err('Chưa chọn sản phẩm.');
 
         $now = current_time('mysql');
-        $combo_hash = self::combo_hash($variant_ids);
 
         // Lookup SKU + barcode from product table for cross-site identification
         $product = $wpdb->get_row($wpdb->prepare(
@@ -884,8 +816,6 @@ class TGS_Identifier_Ajax
             'local_product_barcode_main' => $product['local_product_barcode_main'] ?? null,
             'exp_date'                   => $exp_date !== '' ? $exp_date : null,
             'lot_code'                   => $lot_code !== '' ? $lot_code : null,
-            'variant_ids'                => wp_json_encode(array_map('intval', $variant_ids)),
-            'variant_combo_hash'         => $combo_hash,
             'codes_count'                => 0,
             'block_sort_order'           => 0,
             'user_id'                    => get_current_user_id(),
@@ -956,7 +886,6 @@ class TGS_Identifier_Ajax
                  SET local_product_lot_is_active = 100,
                      local_product_name_id = NULL,
                      local_product_sku = NULL,
-                     variant_combo_hash = NULL,
                      identifier_ledger_id = NULL,
                      block_id = NULL,
                      exp_date = NULL,
@@ -964,12 +893,6 @@ class TGS_Identifier_Ajax
                      updated_at = %s
                  WHERE global_product_lot_id IN ({$ph})",
                 ...array_merge([$now], $lots)
-            ));
-
-            // Delete variant map
-            $wpdb->query($wpdb->prepare(
-                "DELETE FROM " . TGS_TABLE_GLOBAL_LOT_VARIANT_MAP . " WHERE global_product_lot_id IN ({$ph})",
-                ...$lots
             ));
         }
 
@@ -980,30 +903,6 @@ class TGS_Identifier_Ajax
         ], ['block_id' => $block_id]);
 
         self::json_ok([], 'Đã xóa khối sản phẩm.');
-    }
-
-    /**
-     * Cập nhật biến thể cho khối
-     */
-    public static function tgs_idtf_update_block_variants()
-    {
-        self::verify();
-        global $wpdb;
-
-        $block_id    = intval($_POST['block_id'] ?? 0);
-        $variant_ids = json_decode(stripslashes($_POST['variant_ids'] ?? '[]'), true) ?: [];
-
-        if ($block_id <= 0) self::json_err('block_id không hợp lệ.');
-
-        $combo_hash = self::combo_hash($variant_ids);
-
-        $wpdb->update(TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS, [
-            'variant_ids'        => wp_json_encode(array_map('intval', $variant_ids)),
-            'variant_combo_hash' => $combo_hash,
-            'updated_at'         => current_time('mysql'),
-        ], ['block_id' => $block_id]);
-
-        self::json_ok(['combo_hash' => $combo_hash], 'Đã cập nhật biến thể.');
     }
 
     /* =========================================================================
@@ -1096,8 +995,6 @@ class TGS_Identifier_Ajax
         $product_id  = $block['local_product_name_id'];
         $product_sku = $block['local_product_sku'];
         $ledger_id   = $block['ledger_id'];
-        $variant_ids = json_decode($block['variant_ids'] ?? '[]', true) ?: [];
-        $combo_hash  = $block['variant_combo_hash'];
         $block_exp   = $block['exp_date'] ?: null;
         $block_lot   = $block['lot_code'] ?: null;
         $now         = current_time('mysql');
@@ -1114,8 +1011,6 @@ class TGS_Identifier_Ajax
                 'local_product_sku'            => $product_sku,
                 'local_product_lot_is_active'  => 1,
                 'global_product_lot_is_active' => 1,
-                'variant_combo_hash'           => $combo_hash,
-                'variant_ids'                  => !empty($variant_ids) ? wp_json_encode(array_map('intval', $variant_ids)) : null,
                 'identifier_ledger_id'         => $ledger_id,
                 'block_id'                     => $block_id,
                 'to_blog_id'                   => $block['source_blog_id'],
@@ -1132,26 +1027,6 @@ class TGS_Identifier_Ajax
                 $assigned++;
                 $assigned_lot_ids[] = $lot_id;
             }
-        }
-
-        // Batch INSERT variant map cho tất cả lot đã gắn thành công
-        if (!empty($assigned_lot_ids) && !empty($variant_ids)) {
-            $map_table = TGS_TABLE_GLOBAL_LOT_VARIANT_MAP;
-            $values = [];
-            $placeholders = [];
-            foreach ($assigned_lot_ids as $a_lot_id) {
-                foreach ($variant_ids as $vid) {
-                    $vid = intval($vid);
-                    $placeholders[] = '(%d, %d, %s)';
-                    $values[] = $a_lot_id;
-                    $values[] = $vid;
-                    $values[] = $now;
-                }
-            }
-            // INSERT IGNORE để bỏ qua nếu đã có (UNIQUE KEY)
-            $sql = "INSERT IGNORE INTO {$map_table} (global_product_lot_id, variant_id, created_at) VALUES "
-                 . implode(', ', $placeholders);
-            $wpdb->query($wpdb->prepare($sql, ...$values));
         }
 
         // Update codes_count cache — dùng block_id chính xác
@@ -1210,7 +1085,6 @@ class TGS_Identifier_Ajax
             'global_product_lot_is_active' => 100,
             'local_product_name_id'        => null,
             'local_product_sku'            => null,
-            'variant_combo_hash'           => null,
             'identifier_ledger_id'         => null,
             'block_id'                     => null,
             'exp_date'                     => null,
@@ -1220,9 +1094,6 @@ class TGS_Identifier_Ajax
             'global_product_lot_id' => $lot_id,
             'is_deleted'            => 0,
         ]);
-
-        // Delete variant map
-        $wpdb->delete(TGS_TABLE_GLOBAL_LOT_VARIANT_MAP, ['global_product_lot_id' => $lot_id]);
 
         // Update block codes_count if block_id provided — dùng block_id chính xác
         if ($block_id > 0) {
@@ -1363,154 +1234,12 @@ class TGS_Identifier_Ajax
         $assignment = self::lookup_lot_assignment($lot);
         if ($assignment) $result['assignment'] = $assignment;
 
-        // Lấy biến thể
-        $variants = $wpdb->get_results($wpdb->prepare(
-            "SELECT v.variant_id, v.variant_type, v.variant_label, v.variant_value
-             FROM " . TGS_TABLE_GLOBAL_LOT_VARIANT_MAP . " m
-             JOIN " . TGS_TABLE_GLOBAL_PRODUCT_VARIANTS . " v ON m.variant_id = v.variant_id
-             WHERE m.global_product_lot_id = %d",
-            $lot['global_product_lot_id']
-        ), ARRAY_A);
-
-        $result['variants'] = $variants;
-
         self::json_ok($result);
     }
 
     /* =========================================================================
-     * F. BIẾN THỂ + SẢN PHẨM
+     * F. SẢN PHẨM
      * ========================================================================= */
-
-    public static function tgs_idtf_get_variants()
-    {
-        self::verify();
-        global $wpdb;
-
-        $product_id = intval($_POST['product_id'] ?? 0);
-        $blog_id    = intval($_POST['blog_id'] ?? get_current_blog_id());
-
-        $table = TGS_TABLE_GLOBAL_PRODUCT_VARIANTS;
-
-        // Cross-site: query by local_product_sku (same SKU across all sites)
-        if ($product_id > 0) {
-            $sku = $wpdb->get_var($wpdb->prepare(
-                "SELECT local_product_sku FROM " . self::product_table() . " WHERE local_product_name_id = %d AND (is_deleted IS NULL OR is_deleted = 0)",
-                $product_id
-            ));
-
-            if ($sku) {
-                $rows = $wpdb->get_results($wpdb->prepare(
-                    "SELECT * FROM {$table} WHERE local_product_sku = %s AND is_deleted = 0 ORDER BY variant_sort_order ASC, variant_id DESC",
-                    $sku
-                ), ARRAY_A);
-            } else {
-                // Fallback: product has no SKU, query by product_id + blog_id
-                $rows = $wpdb->get_results($wpdb->prepare(
-                    "SELECT * FROM {$table} WHERE local_product_name_id = %d AND source_blog_id = %d AND is_deleted = 0 ORDER BY variant_sort_order ASC, variant_id DESC",
-                    $product_id, $blog_id
-                ), ARRAY_A);
-            }
-        } else {
-            $rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT * FROM {$table} WHERE source_blog_id = %d AND is_deleted = 0 ORDER BY variant_sort_order ASC, variant_id DESC",
-                $blog_id
-            ), ARRAY_A);
-        }
-
-        self::json_ok(['variants' => $rows ?: []]);
-    }
-
-    public static function tgs_idtf_save_variant()
-    {
-        self::verify();
-        global $wpdb;
-
-        $table = TGS_TABLE_GLOBAL_PRODUCT_VARIANTS;
-        $now   = current_time('mysql');
-
-        $variant_id = intval($_POST['variant_id'] ?? 0);
-        $product_id = intval($_POST['product_id'] ?? 0);
-        $blog_id    = intval($_POST['blog_id'] ?? get_current_blog_id());
-
-        if ($product_id <= 0) self::json_err('Chưa chọn sản phẩm.');
-
-        // Lookup product SKU & barcode
-        $product = $wpdb->get_row($wpdb->prepare(
-            "SELECT local_product_sku, local_product_barcode_main FROM " . self::product_table() . " WHERE local_product_name_id = %d AND (is_deleted IS NULL OR is_deleted = 0)",
-            $product_id
-        ), ARRAY_A);
-
-        $data = [
-            'local_product_name_id'      => $product_id,
-            'source_blog_id'             => $blog_id,
-            'local_product_sku'          => $product ? $product['local_product_sku'] : null,
-            'local_product_barcode_main' => $product ? $product['local_product_barcode_main'] : null,
-            'variant_type'               => sanitize_text_field($_POST['variant_type'] ?? 'custom'),
-            'variant_label'            => sanitize_text_field($_POST['variant_label'] ?? ''),
-            'variant_value'            => sanitize_text_field($_POST['variant_value'] ?? ''),
-            'variant_sku_suffix'       => sanitize_text_field($_POST['variant_sku_suffix'] ?? ''),
-            'variant_barcode_main'     => sanitize_text_field($_POST['variant_barcode_main'] ?? ''),
-            'variant_price_adjustment' => floatval($_POST['variant_price_adjustment'] ?? 0),
-            'variant_sort_order'       => intval($_POST['variant_sort_order'] ?? 0),
-            'is_active'                => intval($_POST['is_active'] ?? 1),
-            'updated_at'               => $now,
-        ];
-
-        if (!empty($_POST['variant_meta'])) {
-            $data['variant_meta'] = wp_json_encode(json_decode(stripslashes($_POST['variant_meta']), true));
-        }
-
-        // Duplicate check: by SKU (cross-site) + label + value
-        $sku_for_dup = $product ? $product['local_product_sku'] : null;
-        if ($sku_for_dup) {
-            $dup_sql = $wpdb->prepare(
-                "SELECT variant_id FROM {$table}
-                 WHERE local_product_sku = %s
-                   AND variant_label = %s AND variant_value = %s AND is_deleted = 0",
-                $sku_for_dup, $data['variant_label'], $data['variant_value']
-            );
-        } else {
-            $dup_sql = $wpdb->prepare(
-                "SELECT variant_id FROM {$table}
-                 WHERE local_product_name_id = %d AND source_blog_id = %d
-                   AND variant_label = %s AND variant_value = %s AND is_deleted = 0",
-                $product_id, $blog_id, $data['variant_label'], $data['variant_value']
-            );
-        }
-        if ($variant_id > 0) {
-            $dup_sql .= $wpdb->prepare(" AND variant_id != %d", $variant_id);
-        }
-        if ($wpdb->get_var($dup_sql)) {
-            self::json_err('Biến thể này đã tồn tại.');
-        }
-
-        if ($variant_id > 0) {
-            $wpdb->update($table, $data, ['variant_id' => $variant_id]);
-            self::json_ok(['variant_id' => $variant_id], 'Đã cập nhật biến thể.');
-        } else {
-            $data['created_at'] = $now;
-            $wpdb->insert($table, $data);
-            $new_id = $wpdb->insert_id;
-            if (!$new_id) self::json_err('Không thể tạo biến thể. DB: ' . $wpdb->last_error);
-            self::json_ok(['variant_id' => $new_id], 'Đã thêm biến thể.');
-        }
-    }
-
-    public static function tgs_idtf_delete_variant()
-    {
-        self::verify();
-        global $wpdb;
-
-        $variant_id = intval($_POST['variant_id'] ?? 0);
-        if ($variant_id <= 0) self::json_err('variant_id không hợp lệ.');
-
-        $wpdb->update(TGS_TABLE_GLOBAL_PRODUCT_VARIANTS, [
-            'is_deleted' => 1,
-            'deleted_at' => current_time('mysql'),
-        ], ['variant_id' => $variant_id]);
-
-        self::json_ok([], 'Đã xóa biến thể.');
-    }
 
     public static function tgs_idtf_search_products()
     {
@@ -1632,11 +1361,11 @@ class TGS_Identifier_Ajax
     }
 
     /* =========================================================================
-     * G. THỐNG KÊ MÃ ĐỊNH DANH THEO SẢN PHẨM + BIẾN THỂ
+     * G. THỐNG KÊ MÃ ĐỊNH DANH THEO SẢN PHẨM
      * ========================================================================= */
 
     /**
-     * Lấy danh sách sản phẩm có mã định danh + thống kê combo biến thể
+     * Lấy danh sách sản phẩm có mã định danh
      */
     public static function tgs_idtf_get_product_codes_list()
     {
@@ -1687,97 +1416,6 @@ class TGS_Identifier_Ajax
         $list_params = array_merge($params, [$per_page, $offset]);
         $products = $wpdb->get_results($wpdb->prepare($list_sql, ...$list_params), ARRAY_A);
 
-        // For each product, get variant combos (grouped)
-        if ($products) {
-            $skus = array_column($products, 'local_product_sku');
-            $sku_ph = implode(',', array_fill(0, count($skus), '%s'));
-
-            // Get variant combos with counts
-            $combos = $wpdb->get_results($wpdb->prepare(
-                "SELECT l.local_product_sku, l.variant_combo_hash, l.exp_date, l.lot_code,
-                        COUNT(*) as codes_count,
-                        SUM(CASE WHEN l.local_product_lot_is_active = 1 THEN 1 ELSE 0 END) as active_count,
-                        SUM(CASE WHEN l.local_product_lot_is_active = 0 THEN 1 ELSE 0 END) as sold_count
-                 FROM {$lots_tbl} l
-                 WHERE l.local_product_sku IN ({$sku_ph})
-                   AND l.local_product_lot_is_active IN (0, 1)
-                   AND l.is_deleted = 0
-                 GROUP BY l.local_product_sku, l.variant_combo_hash
-                 ORDER BY codes_count DESC",
-                ...$skus
-            ), ARRAY_A);
-
-            // Collect unique combo hashes for variant lookup
-            $hash_set = [];
-            foreach ($combos as $c) {
-                if ($c['variant_combo_hash']) $hash_set[$c['variant_combo_hash']] = true;
-            }
-
-            // Batch-load variant info for all hashes via blocks table
-            $hash_labels = []; // hash => [{label, value}, ...]
-            if (!empty($hash_set)) {
-                $hashes = array_keys($hash_set);
-                $h_ph = implode(',', array_fill(0, count($hashes), '%s'));
-                $block_rows = $wpdb->get_results($wpdb->prepare(
-                    "SELECT DISTINCT variant_combo_hash, variant_ids
-                     FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . "
-                     WHERE variant_combo_hash IN ({$h_ph}) AND is_deleted = 0",
-                    ...$hashes
-                ), ARRAY_A);
-
-                // Collect all variant IDs
-                $all_vids = [];
-                foreach ($block_rows as $br) {
-                    $vids = json_decode($br['variant_ids'] ?? '[]', true) ?: [];
-                    foreach ($vids as $vid) $all_vids[intval($vid)] = true;
-                }
-
-                $var_info = [];
-                if (!empty($all_vids)) {
-                    $v_ids = array_keys($all_vids);
-                    $v_ph = implode(',', array_fill(0, count($v_ids), '%d'));
-                    $v_rows = $wpdb->get_results($wpdb->prepare(
-                        "SELECT variant_id, variant_type, variant_label, variant_value
-                         FROM " . TGS_TABLE_GLOBAL_PRODUCT_VARIANTS . "
-                         WHERE variant_id IN ({$v_ph}) AND is_deleted = 0",
-                        ...$v_ids
-                    ), ARRAY_A);
-                    foreach ($v_rows as $vr) $var_info[intval($vr['variant_id'])] = $vr;
-                }
-
-                foreach ($block_rows as $br) {
-                    $h = $br['variant_combo_hash'];
-                    if (isset($hash_labels[$h])) continue;
-                    $vids = json_decode($br['variant_ids'] ?? '[]', true) ?: [];
-                    $labels = [];
-                    foreach ($vids as $vid) {
-                        $vi = $var_info[intval($vid)] ?? null;
-                        if ($vi) $labels[] = ['label' => $vi['variant_label'], 'value' => $vi['variant_value']];
-                    }
-                    $hash_labels[$h] = $labels;
-                }
-            }
-
-            // Attach combos to products
-            $combo_map = []; // sku => [combo, ...]
-            foreach ($combos as $c) {
-                $sku = $c['local_product_sku'];
-                if (!isset($combo_map[$sku])) $combo_map[$sku] = [];
-                $combo_map[$sku][] = [
-                    'variant_combo_hash' => $c['variant_combo_hash'],
-                    'variants'           => $hash_labels[$c['variant_combo_hash']] ?? [],
-                    'codes_count'        => intval($c['codes_count']),
-                    'active_count'       => intval($c['active_count']),
-                    'sold_count'         => intval($c['sold_count']),
-                ];
-            }
-
-            foreach ($products as &$p) {
-                $p['combos'] = $combo_map[$p['local_product_sku']] ?? [];
-            }
-            unset($p);
-        }
-
         self::json_ok([
             'products' => $products ?: [],
             'total'    => intval($total),
@@ -1795,7 +1433,6 @@ class TGS_Identifier_Ajax
         global $wpdb;
 
         $sku        = sanitize_text_field($_POST['sku'] ?? '');
-        $combo_hash = sanitize_text_field($_POST['combo_hash'] ?? '');
         $exp_date   = sanitize_text_field($_POST['exp_date'] ?? '');
         $lot_code   = sanitize_text_field($_POST['lot_code'] ?? '');
         $page       = max(1, intval($_POST['page'] ?? 1));
@@ -1807,14 +1444,6 @@ class TGS_Identifier_Ajax
 
         $where = "l.local_product_sku = %s AND l.local_product_lot_is_active IN (0, 1) AND l.is_deleted = 0";
         $params = [$sku];
-
-        // Combo filter: empty string = no filter, 'null' = no variants, hash = exact combo
-        if ($combo_hash === 'null') {
-            $where .= " AND l.variant_combo_hash IS NULL";
-        } elseif ($combo_hash !== '') {
-            $where .= " AND l.variant_combo_hash = %s";
-            $params[] = $combo_hash;
-        }
 
         if ($exp_date !== '') {
             $where .= " AND l.exp_date = %s";
@@ -1834,7 +1463,7 @@ class TGS_Identifier_Ajax
         $rows = $wpdb->get_results($wpdb->prepare(
             "SELECT l.global_product_lot_id, l.global_product_lot_barcode,
                     l.local_product_lot_is_active, l.exp_date, l.lot_code,
-                    l.variant_combo_hash, l.identifier_ledger_id,
+                    l.identifier_ledger_id,
                     l.created_at, l.updated_at
              FROM {$lots_tbl} l
              WHERE {$where}
@@ -1843,58 +1472,11 @@ class TGS_Identifier_Ajax
             ...array_merge($params, [$per_page, $offset])
         ), ARRAY_A);
 
-        // Batch variant labels
-        if ($rows) {
-            $hash_set = [];
-            foreach ($rows as $r) {
-                if ($r['variant_combo_hash']) $hash_set[$r['variant_combo_hash']] = true;
-            }
-            $hash_labels = [];
-            if (!empty($hash_set)) {
-                $hashes = array_keys($hash_set);
-                $h_ph = implode(',', array_fill(0, count($hashes), '%s'));
-                $block_rows = $wpdb->get_results($wpdb->prepare(
-                    "SELECT DISTINCT variant_combo_hash, variant_ids FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . "
-                     WHERE variant_combo_hash IN ({$h_ph}) AND is_deleted = 0",
-                    ...$hashes
-                ), ARRAY_A);
-                $all_vids = [];
-                foreach ($block_rows as $br) {
-                    foreach (json_decode($br['variant_ids'] ?? '[]', true) ?: [] as $vid) $all_vids[intval($vid)] = true;
-                }
-                $var_info = [];
-                if (!empty($all_vids)) {
-                    $v_ids = array_keys($all_vids);
-                    $v_ph = implode(',', array_fill(0, count($v_ids), '%d'));
-                    foreach ($wpdb->get_results($wpdb->prepare(
-                        "SELECT variant_id, variant_label, variant_value FROM " . TGS_TABLE_GLOBAL_PRODUCT_VARIANTS . "
-                         WHERE variant_id IN ({$v_ph}) AND is_deleted = 0", ...$v_ids
-                    ), ARRAY_A) as $vr) $var_info[intval($vr['variant_id'])] = $vr;
-                }
-                foreach ($block_rows as $br) {
-                    $h = $br['variant_combo_hash'];
-                    if (isset($hash_labels[$h])) continue;
-                    $labels = [];
-                    foreach (json_decode($br['variant_ids'] ?? '[]', true) ?: [] as $vid) {
-                        $vi = $var_info[intval($vid)] ?? null;
-                        if ($vi) $labels[] = ['label' => $vi['variant_label'], 'value' => $vi['variant_value']];
-                    }
-                    $hash_labels[$h] = $labels;
-                }
-            }
-
-            foreach ($rows as &$r) {
-                $r['variants'] = $hash_labels[$r['variant_combo_hash']] ?? [];
-            }
-            unset($r);
-        }
-
         // Aggregate: distinct exp_date + lot_code for filter dropdowns
         $filters = $wpdb->get_results($wpdb->prepare(
             "SELECT DISTINCT l.exp_date, l.lot_code
              FROM {$lots_tbl} l
-             WHERE l.local_product_sku = %s AND l.local_product_lot_is_active IN (0, 1) AND l.is_deleted = 0"
-            . ($combo_hash === 'null' ? " AND l.variant_combo_hash IS NULL" : ($combo_hash !== '' ? $wpdb->prepare(" AND l.variant_combo_hash = %s", $combo_hash) : '')),
+             WHERE l.local_product_sku = %s AND l.local_product_lot_is_active IN (0, 1) AND l.is_deleted = 0",
             $sku
         ), ARRAY_A);
 
@@ -1928,7 +1510,6 @@ class TGS_Identifier_Ajax
         global $wpdb;
 
         $sku        = sanitize_text_field($_GET['sku'] ?? '');
-        $combo_hash = sanitize_text_field($_GET['combo_hash'] ?? '');
         $exp_date   = sanitize_text_field($_GET['exp_date'] ?? '');
         $lot_code   = sanitize_text_field($_GET['lot_code'] ?? '');
 
@@ -1940,18 +1521,12 @@ class TGS_Identifier_Ajax
         $where = "l.local_product_sku = %s AND l.local_product_lot_is_active IN (0, 1) AND l.is_deleted = 0";
         $params = [$sku];
 
-        if ($combo_hash === 'null') {
-            $where .= " AND l.variant_combo_hash IS NULL";
-        } elseif ($combo_hash !== '') {
-            $where .= " AND l.variant_combo_hash = %s";
-            $params[] = $combo_hash;
-        }
         if ($exp_date !== '') { $where .= " AND l.exp_date = %s"; $params[] = $exp_date; }
         if ($lot_code !== '') { $where .= " AND l.lot_code = %s"; $params[] = $lot_code; }
 
         $rows = $wpdb->get_results($wpdb->prepare(
             "SELECT l.global_product_lot_barcode, l.local_product_lot_is_active,
-                    l.exp_date, l.lot_code, l.variant_combo_hash,
+                    l.exp_date, l.lot_code,
                     l.created_at, l.updated_at, p.local_product_name
              FROM {$lots_tbl} l
              LEFT JOIN {$prod_tbl} p ON p.local_product_sku = l.local_product_sku AND (p.is_deleted IS NULL OR p.is_deleted = 0)
@@ -1960,41 +1535,6 @@ class TGS_Identifier_Ajax
              LIMIT 10000",
             ...$params
         ), ARRAY_A);
-
-        // Variant labels batch
-        $hash_set = [];
-        foreach ($rows as $r) { if ($r['variant_combo_hash']) $hash_set[$r['variant_combo_hash']] = true; }
-        $hash_labels = [];
-        if (!empty($hash_set)) {
-            $hashes = array_keys($hash_set);
-            $h_ph = implode(',', array_fill(0, count($hashes), '%s'));
-            $block_rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT DISTINCT variant_combo_hash, variant_ids FROM " . TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS . "
-                 WHERE variant_combo_hash IN ({$h_ph}) AND is_deleted = 0", ...$hashes
-            ), ARRAY_A);
-            $all_vids = [];
-            foreach ($block_rows as $br) {
-                foreach (json_decode($br['variant_ids'] ?? '[]', true) ?: [] as $vid) $all_vids[intval($vid)] = true;
-            }
-            $var_info = [];
-            if (!empty($all_vids)) {
-                $v_ph = implode(',', array_fill(0, count(array_keys($all_vids)), '%d'));
-                foreach ($wpdb->get_results($wpdb->prepare(
-                    "SELECT variant_id, variant_label, variant_value FROM " . TGS_TABLE_GLOBAL_PRODUCT_VARIANTS . "
-                     WHERE variant_id IN ({$v_ph}) AND is_deleted = 0", ...array_keys($all_vids)
-                ), ARRAY_A) as $vr) $var_info[intval($vr['variant_id'])] = $vr;
-            }
-            foreach ($block_rows as $br) {
-                $h = $br['variant_combo_hash'];
-                if (isset($hash_labels[$h])) continue;
-                $parts = [];
-                foreach (json_decode($br['variant_ids'] ?? '[]', true) ?: [] as $vid) {
-                    $vi = $var_info[intval($vid)] ?? null;
-                    if ($vi) $parts[] = $vi['variant_label'] . ': ' . $vi['variant_value'];
-                }
-                $hash_labels[$h] = implode(' | ', $parts);
-            }
-        }
 
         // Product name
         $product_name = !empty($rows) ? ($rows[0]['local_product_name'] ?? $sku) : $sku;
@@ -2007,16 +1547,15 @@ class TGS_Identifier_Ajax
         echo "\xEF\xBB\xBF"; // UTF-8 BOM
 
         $fp = fopen('php://output', 'w');
-        fputcsv($fp, ['Sản phẩm', 'SKU', 'Mã barcode', 'Trạng thái', 'Biến thể', 'HSD', 'Mã lô', 'Ngày cập nhật']);
+        fputcsv($fp, ['Sản phẩm', 'SKU', 'Mã barcode', 'Trạng thái', 'HSD', 'Mã lô', 'Ngày cập nhật']);
 
         foreach ($rows as $r) {
             $st = intval($r['local_product_lot_is_active']);
             $status_label = $st === 1 ? 'Đã định danh' : ($st === 0 ? 'Đã bán' : $st);
-            $var_label = $hash_labels[$r['variant_combo_hash']] ?? 'Không có';
             $exp = $r['exp_date'] ?: '';
             $lot = $r['lot_code'] ?: '';
 
-            fputcsv($fp, [$product_name, $sku, $r['global_product_lot_barcode'], $status_label, $var_label, $exp, $lot, $r['updated_at']]);
+            fputcsv($fp, [$product_name, $sku, $r['global_product_lot_barcode'], $status_label, $exp, $lot, $r['updated_at']]);
         }
         fclose($fp);
         exit;

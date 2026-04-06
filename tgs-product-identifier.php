@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: TGS Product Identifier
- * Description: Sinh mã định danh trống + Định danh sản phẩm vào mã + Biến thể kết hợp
+ * Description: Sinh mã định danh trống + Định danh sản phẩm vào mã
  * Version: 1.0.0
  * Author: TGS Dev Team
  * Requires Plugins: tgs_shop_management
@@ -24,12 +24,6 @@ if (!defined('TGS_LEDGER_TYPE_IDENTIFY')) {
 }
 
 // Tables
-if (!defined('TGS_TABLE_GLOBAL_PRODUCT_VARIANTS')) {
-    define('TGS_TABLE_GLOBAL_PRODUCT_VARIANTS', 'wp_global_product_variants');
-}
-if (!defined('TGS_TABLE_GLOBAL_LOT_VARIANT_MAP')) {
-    define('TGS_TABLE_GLOBAL_LOT_VARIANT_MAP', 'wp_global_lot_variant_map');
-}
 if (!defined('TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS')) {
     define('TGS_TABLE_GLOBAL_IDENTIFY_BLOCKS', 'wp_global_identify_blocks');
 }
@@ -58,15 +52,12 @@ add_filter('tgs_shop_dashboard_routes', function ($routes) {
     $routes['idtf-blank-detail'] = ['Chi tiết phiếu mã',   $dir . 'blank-codes/detail.php'];
     $routes['idtf-workspace']    = ['Định danh sản phẩm',  $dir . 'identify/workspace.php'];
     $routes['idtf-product-codes'] = ['Thống kê mã SP',      $dir . 'identify/product-codes.php'];
-    $routes['idtf-variants']     = ['Quản lý biến thể',    $dir . 'variants/list.php'];
     return $routes;
 });
 
 // ── Sidebar Menu ─────────────────────────────────────────────────────────────
 add_action('tgs_shop_product_menu', function ($current_view) {
-    // Chỉ hiển thị 2 menu: Thống kê mã SP + Quản lý biến thể
-    // Các menu ẩn tạm: idtf-blank-create, idtf-blank-list, idtf-blank-detail, idtf-workspace
-    $views = ['idtf-product-codes', 'idtf-variants'];
+    $views = ['idtf-product-codes'];
     $is_active = in_array($current_view, $views);
     $open = $is_active ? ' active open' : '';
     $href = function_exists('tgs_url') ? function ($v) { return tgs_url($v); } : function ($v) {
@@ -76,14 +67,11 @@ add_action('tgs_shop_product_menu', function ($current_view) {
     <li class="menu-item<?php echo $open; ?>">
         <a href="javascript:void(0);" class="menu-link menu-toggle">
             <i class="menu-icon tf-icons bx bx-purchase-tag"></i>
-            <div>Quản lý biến thể</div>
+            <div>Quản lý mã SP</div>
         </a>
         <ul class="menu-sub">
             <li class="menu-item<?php echo $current_view === 'idtf-product-codes' ? ' active' : ''; ?>">
                 <a href="<?php echo esc_url($href('idtf-product-codes')); ?>" class="menu-link"><div>Thống kê mã SP</div></a>
-            </li>
-            <li class="menu-item<?php echo $current_view === 'idtf-variants' ? ' active' : ''; ?>">
-                <a href="<?php echo esc_url($href('idtf-variants')); ?>" class="menu-link"><div>Quản lý biến thể</div></a>
             </li>
         </ul>
     </li>
@@ -128,8 +116,5 @@ add_action('admin_enqueue_scripts', function () {
         wp_enqueue_script('tgs-idtf-product-codes', TGS_IDTF_URL . 'assets/js/product-codes.js', ['jquery'], TGS_IDTF_VERSION, true);
         wp_localize_script('tgs-idtf-product-codes', 'tgsIdtf', $localize);
     }
-    if ($view === 'idtf-variants') {
-        wp_enqueue_script('tgs-idtf-variants', TGS_IDTF_URL . 'assets/js/variant-manager.js', ['jquery'], TGS_IDTF_VERSION, true);
-        wp_localize_script('tgs-idtf-variants', 'tgsIdtf', $localize);
-    }
+
 });

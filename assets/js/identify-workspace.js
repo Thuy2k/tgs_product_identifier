@@ -64,14 +64,6 @@
         var b = blocksMap[blockId];
         if (!b) { $el.hide(); return; }
 
-        var varHtml = '';
-        if (b.variants && b.variants.length) {
-            $.each(b.variants, function (_, v) {
-                varHtml += '<span class="badge bg-label-primary me-1" style="font-size:11px;">'
-                    + esc(v.variant_label) + ': ' + esc(v.variant_value) + '</span>';
-            });
-        }
-
         var metaBadges = '';
         if (b.exp_date) {
             var ep = b.exp_date.split('-');
@@ -88,7 +80,6 @@
             + '  <div class="fw-semibold" style="font-size:13px;">' + esc(b.local_product_name || 'Sản phẩm #' + b.local_product_name_id) + '</div>'
             + '  <div style="font-size:11px; color:#8592a3;">SKU: <b>' + esc(b.local_product_sku || '—') + '</b>'
             + (b.local_product_barcode_main ? ' · Barcode: ' + esc(b.local_product_barcode_main) : '') + '</div>'
-            + (varHtml ? '<div class="mt-1">' + varHtml + '</div>' : '')
             + (metaBadges ? '<div class="mt-1">' + metaBadges + '</div>' : '')
             + '</div>'
             + '</div>'
@@ -350,12 +341,6 @@
             + '</div>');
 
         $.each(blocks, function (_, b) {
-            var varTags = '';
-            if (b.variants && b.variants.length) {
-                $.each(b.variants, function (_, v) {
-                    varTags += '<span class="idtf-variant-tag">' + esc(v.variant_label) + ': ' + esc(v.variant_value) + '</span>';
-                });
-            }
             var count = parseInt(b.codes_count) || 0;
 
             var metaLine = '';
@@ -379,7 +364,6 @@
                 + '  </div>'
                 + '</div>'
                 + '<div class="idtf-block-body">'
-                + '  <div class="idtf-block-variants">' + (varTags || '<span class="text-muted" style="font-size:12px;"><i class="bx bx-info-circle me-1"></i>Không có biến thể</span>') + '</div>'
                 + (metaLine ? '<div class="mt-1">' + metaLine + '</div>' : '')
                 + '</div>'
                 + '<div class="idtf-block-actions">'
@@ -395,8 +379,6 @@
      * F. ADD BLOCK MODAL
      * ===================================================================== */
     var blockProductTimer = null;
-    var blockVariantsData = []; // loaded variant list
-    var blockSelectedVars = []; // selected variant IDs
 
     $('#btnAddBlock').on('click', function () {
         resetAddBlockModal();
@@ -408,15 +390,11 @@
         $('#blockProductId').val('');
         $('#blockProductDropdown').hide().empty();
         $('#blockProductInfo').hide();
-        $('#blockVariantSection').hide();
-        $('#blockVariantList').empty();
         $('#btnConfirmAddBlock').prop('disabled', true);
         $('#blockExpDateDisplay').val('');
         $('#blockExpDatePicker').val('');
         $('#blockExpDate').val('');
         $('#blockLotCode').val('');
-        blockVariantsData = [];
-        blockSelectedVars = [];
     }
 
     /* -- HSD date picker sync -- */
@@ -513,63 +491,13 @@
         $('#blockProductSearch').hide();
         $('#blockProductInfo').show();
         $('#btnConfirmAddBlock').prop('disabled', false);
-
-        // Load variants for this product
-        loadBlockVariants(p.local_product_name_id);
     }
 
     $('#blockClearProduct').on('click', function () {
         $('#blockProductId').val('');
         $('#blockProductSearch').val('').show();
         $('#blockProductInfo').hide();
-        $('#blockVariantSection').hide();
         $('#btnConfirmAddBlock').prop('disabled', true);
-        blockVariantsData = [];
-        blockSelectedVars = [];
-    });
-
-    function loadBlockVariants(productId) {
-        ajax('tgs_idtf_get_variants', { product_id: productId }, function (d) {
-            blockVariantsData = d.variants || [];
-            blockSelectedVars = [];
-            // Luôn hiện section — để nhân viên có thể thêm biến thể mới
-            $('#blockVariantSection').show();
-            renderBlockVariantChips();
-        });
-    }
-
-    function renderBlockVariantChips() {
-        var $list = $('#blockVariantList').empty();
-        if (!blockVariantsData.length) {
-            $list.html('<span class="text-muted" style="font-size:12px;">Chưa có biến thể. Bấm nút bên dưới để thêm.</span>');
-            return;
-        }
-        $.each(blockVariantsData, function (_, v) {
-            var sel = blockSelectedVars.indexOf(parseInt(v.variant_id)) >= 0 ? ' selected' : '';
-            $list.append(
-                '<div class="idtf-var-chip' + sel + '" data-vid="' + v.variant_id + '">'
-                + esc(v.variant_label) + ': ' + esc(v.variant_value)
-                + '</div>'
-            );
-        });
-    }
-
-    // Toggle variant chip selection
-    $(document).on('click', '#blockVariantList .idtf-var-chip', function () {
-        var vid = parseInt($(this).data('vid'));
-        var idx = blockSelectedVars.indexOf(vid);
-        if (idx >= 0) {
-            blockSelectedVars.splice(idx, 1);
-            $(this).removeClass('selected');
-        } else {
-            blockSelectedVars.push(vid);
-            $(this).addClass('selected');
-        }
-    });
-
-    // Quick variant inside Add Block modal
-    $('#btnBlockQuickVariant').on('click', function () {
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('modalQuickVariant')).show();
     });
 
     // Confirm add block
@@ -581,7 +509,6 @@
         ajax('tgs_idtf_add_product_block', {
             ledger_id: activeTab,
             product_id: productId,
-            variant_ids: JSON.stringify(blockSelectedVars),
             exp_date: $.trim($('#blockExpDate').val()),
             lot_code: $.trim($('#blockLotCode').val())
         }, function (d) {
@@ -889,13 +816,6 @@
             var st = parseInt(d.status);
             var cls = st === 100 ? 'qs-blank' : (st === 1 ? 'qs-identified' : 'qs-notfound');
             var label = st === 100 ? 'Mã trống' : (st === 1 ? 'Đã định danh: ' + esc(d.product_name || 'N/A') : (d.status_label || 'Mã đã bán/xuất'));
-            var vars = '';
-            if (d.variants && d.variants.length) {
-                vars = ' — ';
-                $.each(d.variants, function (_, v) {
-                    vars += '<span class="idtf-variant-tag ms-1" style="font-size:10px;">' + esc(v.variant_label) + ': ' + esc(v.variant_value) + '</span>';
-                });
-            }
             // Hiển thị thông tin phiếu + khối nếu có
             var assignInfo = '';
             if (d.assignment) {
@@ -913,71 +833,9 @@
             if (d.warning) {
                 warning = '<div class="text-danger mt-1" style="font-size:11px;"><i class="bx bx-error me-1"></i>' + esc(d.warning_msg) + '</div>';
             }
-            $r.html('<div class="qs-found ' + cls + '"><i class="bx bx-barcode me-1"></i><code>' + esc(d.barcode) + '</code> — ' + label + vars + assignInfo + warning + '</div>');
+            $r.html('<div class="qs-found ' + cls + '"><i class="bx bx-barcode me-1"></i><code>' + esc(d.barcode) + '</code> — ' + label + assignInfo + warning + '</div>');
         });
     }
-
-    /* =====================================================================
-     * K. QUICK VARIANT MODAL
-     * ===================================================================== */
-    var varPresets = {
-        size: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
-        color: ['Đỏ', 'Xanh', 'Vàng', 'Trắng', 'Đen', 'Hồng'],
-        flavor: ['Vanilla', 'Chocolate', 'Dâu', 'Cam', 'Nho'],
-        weight: ['100g', '250g', '500g', '1kg', '2kg'],
-        age_range: ['0-6th', '6-12th', '1-3t', '3-6t', '6+'],
-        expiry: ['3th', '6th', '9th', '12th', '18th', '24th', '36th'],
-        custom: []
-    };
-
-    var varLabelMap = {
-        size: 'Kích cỡ', color: 'Màu sắc', expiry: 'Hạn sử dụng',
-        flavor: 'Hương vị', weight: 'Trọng lượng', age_range: 'Độ tuổi', custom: ''
-    };
-
-    $('#qvType').on('change', function () {
-        var type = $(this).val();
-        var chips = varPresets[type] || [];
-        var $area = $('#qvPresetChips').empty();
-        if (!chips.length) { $('#qvPresetsArea').hide(); } else {
-            $('#qvPresetsArea').show();
-            $.each(chips, function (_, c) {
-                $area.append('<span class="idtf-preset-chip">' + c + '</span>');
-            });
-        }
-        // Auto-fill label + clear value/suffix
-        $('#qvLabel').val(varLabelMap[type] || '');
-        $('#qvValue').val('');
-        $('#qvSkuSuffix').val('');
-    }).trigger('change');
-
-    $(document).on('click', '#qvPresetChips .idtf-preset-chip', function () {
-        var val = $(this).text();
-        $('#qvValue').val(val);
-        // Auto-fill SKU suffix from value
-        $('#qvSkuSuffix').val('-' + val.replace(/\s+/g, '').substring(0, 10));
-    });
-
-    // Save quick variant
-    $('#btnQvSave').on('click', function () {
-        var productId = parseInt($('#blockProductId').val());
-        if (!productId) { toast('Chưa chọn sản phẩm.', 'error'); return; }
-
-        var $btn = $(this).prop('disabled', true);
-        ajax('tgs_idtf_save_variant', {
-            product_id: productId,
-            variant_type: $('#qvType').val(),
-            variant_label: $.trim($('#qvLabel').val()),
-            variant_value: $.trim($('#qvValue').val()),
-            variant_sku_suffix: $.trim($('#qvSkuSuffix').val())
-        }, function (d) {
-            $btn.prop('disabled', false);
-            bootstrap.Modal.getInstance(document.getElementById('modalQuickVariant')).hide();
-            toast('Đã thêm biến thể.');
-            $('#qvLabel, #qvValue, #qvSkuSuffix').val('');
-            loadBlockVariants(productId);
-        }, function () { $btn.prop('disabled', false); });
-    });
 
     /* =====================================================================
      * L. QUICK PRODUCT MODAL
@@ -1072,9 +930,6 @@
     // Enter to confirm in modals
     $('#modalNewLedger').on('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#btnConfirmNewLedger').trigger('click'); }
-    });
-    $('#modalQuickVariant').on('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#btnQvSave').trigger('click'); }
     });
     $('#modalQuickProduct').on('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#btnQpSave').trigger('click'); }

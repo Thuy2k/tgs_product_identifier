@@ -1,5 +1,5 @@
 /**
- * product-codes.js — Thống kê mã định danh theo sản phẩm + biến thể
+ * product-codes.js — Thống kê mã định danh theo sản phẩm
  * @package tgs_product_identifier
  */
 (function ($) {
@@ -11,7 +11,6 @@
 
     // Modal state
     var modalSku       = '';
-    var modalComboHash = '';
     var modalExpDate   = '';
     var modalLotCode   = '';
     var modalPage      = 1;
@@ -85,19 +84,6 @@
                 html += '</div>';
             }
 
-            // Row 3: Variants
-            if (d.variants && d.variants.length) {
-                html += '<div class="pc-qr-row"><i class="bx bx-category text-muted me-1" style="font-size:13px;"></i>';
-                $.each(d.variants, function (_, v) {
-                    var lbl = v.variant_label || v.label || '';
-                    var val2 = v.variant_value || v.value || '';
-                    if (lbl || val2) {
-                        html += '<span class="badge bg-label-primary me-1" style="font-size:11px;">' + esc(lbl) + ': ' + esc(val2) + '</span>';
-                    }
-                });
-                html += '</div>';
-            }
-
             // Row 4: HSD + Lot
             if (d.exp_date || d.lot_code) {
                 html += '<div class="pc-qr-row">';
@@ -159,40 +145,6 @@
             var identifiedCount = parseInt(p.identified_count) || 0;
             var soldCount = parseInt(p.sold_count) || 0;
 
-            // Build combo rows
-            var comboHtml = '';
-            if (p.combos && p.combos.length) {
-                $.each(p.combos, function (_, c) {
-                    var varLabel = '';
-                    if (!c.variant_combo_hash) {
-                        varLabel = '<span class="text-muted" style="font-size:12px;">Không biến thể</span>';
-                    } else if (c.variants && c.variants.length) {
-                        $.each(c.variants, function (_, v) {
-                            varLabel += '<span class="badge bg-label-primary me-1" style="font-size:10px;">' + esc(v.label) + ': ' + esc(v.value) + '</span>';
-                        });
-                    } else {
-                        varLabel = '<span class="text-muted" style="font-size:12px;">Combo #' + esc(c.variant_combo_hash).substring(0, 8) + '</span>';
-                    }
-
-                    comboHtml += '<tr class="pc-combo-row" data-sku="' + esc(p.local_product_sku) + '" data-combo="' + (c.variant_combo_hash || 'null') + '" style="cursor:pointer;">'
-                        + '<td>' + varLabel + '</td>'
-                        + '<td class="text-center"><span class="badge bg-label-success">' + c.active_count + '</span></td>'
-                        + '<td class="text-center"><span class="badge bg-label-info">' + c.sold_count + '</span></td>'
-                        + '<td class="text-center fw-semibold">' + c.codes_count + '</td>'
-                        + '<td class="text-end"><button class="btn btn-sm btn-outline-primary btn-pc-view" data-sku="' + esc(p.local_product_sku) + '" data-combo="' + (c.variant_combo_hash || 'null') + '" data-name="' + esc(p.local_product_name) + '"><i class="bx bx-show me-1"></i>Xem mã</button></td>'
-                        + '</tr>';
-                });
-            }
-
-            // No-combo row (view all)
-            comboHtml += '<tr class="pc-combo-row table-light" data-sku="' + esc(p.local_product_sku) + '" data-combo="" style="cursor:pointer;">'
-                + '<td><span class="fw-semibold text-primary" style="font-size:12px;"><i class="bx bx-collection me-1"></i>Tất cả (không lọc biến thể)</span></td>'
-                + '<td class="text-center"><span class="badge bg-label-success">' + identifiedCount + '</span></td>'
-                + '<td class="text-center"><span class="badge bg-label-info">' + soldCount + '</span></td>'
-                + '<td class="text-center fw-semibold">' + totalCodes + '</td>'
-                + '<td class="text-end"><button class="btn btn-sm btn-primary btn-pc-view" data-sku="' + esc(p.local_product_sku) + '" data-combo="" data-name="' + esc(p.local_product_name) + '"><i class="bx bx-show me-1"></i>Xem tất cả</button></td>'
-                + '</tr>';
-
             $c.append(
                 '<div class="card mb-3 pc-product-card">'
                 + '<div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center">'
@@ -207,15 +159,8 @@
                 + '    <span class="badge bg-label-success"><i class="bx bx-check me-1"></i>' + identifiedCount + ' định danh</span>'
                 + '    <span class="badge bg-label-info"><i class="bx bx-cart me-1"></i>' + soldCount + ' đã bán</span>'
                 + '    <span class="badge bg-primary"><i class="bx bx-barcode me-1"></i>' + totalCodes + ' tổng mã</span>'
+                + '    <button class="btn btn-sm btn-primary btn-pc-view" data-sku="' + esc(p.local_product_sku) + '" data-name="' + esc(p.local_product_name) + '"><i class="bx bx-show me-1"></i>Xem mã</button>'
                 + '  </div>'
-                + '</div>'
-                + '<div class="card-body p-0">'
-                + '  <table class="table table-sm mb-0">'
-                + '    <thead class="table-light" style="font-size:12px;">'
-                + '      <tr><th>Biến thể / Combo</th><th class="text-center" style="width:90px;">Định danh</th><th class="text-center" style="width:80px;">Đã bán</th><th class="text-center" style="width:70px;">Tổng</th><th style="width:110px;"></th></tr>'
-                + '    </thead>'
-                + '    <tbody>' + comboHtml + '</tbody>'
-                + '  </table>'
                 + '</div>'
                 + '</div>'
             );
@@ -261,7 +206,6 @@
      * ===================================================================== */
     $(document).on('click', '.btn-pc-view', function () {
         modalSku       = $(this).data('sku');
-        modalComboHash = $(this).data('combo');
         modalProductName = $(this).data('name');
         modalExpDate   = '';
         modalLotCode   = '';
@@ -272,7 +216,7 @@
         $('#pcFilterExpDate').html('<option value="">-- HSD --</option>');
         $('#pcFilterLotCode').html('<option value="">-- Mã lô --</option>');
 
-        // Show product info + combo info
+        // Show product info
         $('#pcModalProductInfo').html(
             '<div class="d-flex align-items-center gap-2">'
             + '<i class="bx bx-package" style="font-size:22px; color:#696cff;"></i>'
@@ -280,24 +224,6 @@
             + '<div style="font-size:11px; color:#8592a3;">SKU: <b>' + esc(modalSku) + '</b></div></div>'
             + '</div>'
         );
-
-        var comboLabel = '';
-        if (modalComboHash === '' || modalComboHash === undefined) {
-            comboLabel = '<span class="badge bg-primary"><i class="bx bx-collection me-1"></i>Tất cả mã (không lọc biến thể)</span>';
-        } else if (modalComboHash === 'null') {
-            comboLabel = '<span class="badge bg-label-secondary">Không biến thể</span>';
-        } else {
-            // We'll get variant labels from the loaded data
-            var $btn = $(this);
-            var $row = $btn.closest('tr');
-            var varBadges = $row.find('.badge.bg-label-primary');
-            if (varBadges.length) {
-                varBadges.each(function () { comboLabel += '<span class="badge bg-label-primary me-1">' + $(this).html() + '</span>'; });
-            } else {
-                comboLabel = '<span class="badge bg-label-secondary">Combo: ' + esc(String(modalComboHash).substring(0, 8)) + '…</span>';
-            }
-        }
-        $('#pcModalComboInfo').html(comboLabel);
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalProductCodes')).show();
         loadModalCodes();
@@ -321,17 +247,16 @@
     });
 
     function loadModalCodes() {
-        var $tb = $('#pcModalCodesBody').html('<tr><td colspan="7" class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm me-2"></div>Đang tải...</td></tr>');
+        var $tb = $('#pcModalCodesBody').html('<tr><td colspan="6" class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm me-2"></div>Đang tải...</td></tr>');
         ajax('tgs_idtf_get_product_codes_detail', {
             sku: modalSku,
-            combo_hash: modalComboHash === undefined ? '' : String(modalComboHash),
             exp_date: modalExpDate,
             lot_code: modalLotCode,
             page: modalPage,
             per_page: modalPerPage
         }, function (d) {
             renderModalCodes(d.lots, d.page, d.pages, d.total);
-            // Update filter dropdowns (only on first load or when combo changes)
+            // Update filter dropdowns
             if (d.filter_exp_dates) {
                 var curExp = $('#pcFilterExpDate').val();
                 var $sel = $('#pcFilterExpDate').html('<option value="">-- Tất cả HSD --</option>');
@@ -352,7 +277,7 @@
     function renderModalCodes(rows, page, pages, total) {
         var $tb = $('#pcModalCodesBody').empty();
         if (!rows || !rows.length) {
-            $tb.html('<tr><td colspan="7" class="text-center text-muted py-3">Không có mã nào.</td></tr>');
+            $tb.html('<tr><td colspan="6" class="text-center text-muted py-3">Không có mã nào.</td></tr>');
             $('#pcModalCodesInfo').text('');
             $('#pcModalPager').empty();
             return;
@@ -360,21 +285,12 @@
 
         $.each(rows, function (i, r) {
             var st = parseInt(r.local_product_lot_is_active, 10);
-            var varTags = '';
-            if (r.variants && r.variants.length) {
-                $.each(r.variants, function (_, v) {
-                    varTags += '<span class="badge bg-label-primary me-1" style="font-size:10px;">' + esc(v.label) + ': ' + esc(v.value) + '</span>';
-                });
-            } else {
-                varTags = '<span class="text-muted" style="font-size:11px;">—</span>';
-            }
 
             $tb.append(
                 '<tr>'
                 + '<td>' + ((page - 1) * modalPerPage + i + 1) + '</td>'
                 + '<td><code>' + esc(r.global_product_lot_barcode) + '</code></td>'
                 + '<td>' + statusBadge(st) + '</td>'
-                + '<td>' + varTags + '</td>'
                 + '<td>' + fmtDate(r.exp_date) + '</td>'
                 + '<td>' + esc(r.lot_code || '—') + '</td>'
                 + '<td style="font-size:11px;">' + (r.updated_at ? r.updated_at.substring(0, 16) : '—') + '</td>'
@@ -409,7 +325,6 @@
         var url = tgsIdtf.ajaxUrl + '?action=tgs_idtf_export_product_codes'
             + '&nonce=' + encodeURIComponent(tgsIdtf.nonce)
             + '&sku=' + encodeURIComponent(modalSku)
-            + '&combo_hash=' + encodeURIComponent(modalComboHash === undefined ? '' : String(modalComboHash))
             + '&exp_date=' + encodeURIComponent(modalExpDate || '')
             + '&lot_code=' + encodeURIComponent(modalLotCode || '');
         window.open(url, '_blank');
